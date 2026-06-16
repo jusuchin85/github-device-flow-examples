@@ -93,6 +93,7 @@ done
 # regex check below.
 CLIENT_ID="$(trim "$CLIENT_ID")"
 CLIENT_SECRET="$(trim "${GITHUB_CLIENT_SECRET:-}")"
+SCOPE="$(trim "$SCOPE")"
 
 # Validate Client ID
 if [[ -z "$CLIENT_ID" ]]; then

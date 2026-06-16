@@ -240,6 +240,7 @@ func main() {
 	if scope == "" {
 		scope = defaultScope
 	}
+	scope = strings.TrimSpace(scope)
 
 	// Client secret is env-var only — never a flag
 	clientSecret := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET"))
