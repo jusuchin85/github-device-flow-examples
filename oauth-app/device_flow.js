@@ -27,7 +27,7 @@ const TOKEN_SUFFIX_LENGTH = 8;
 const DEFAULT_SCOPE = "repo,read:org";
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
-const { spawn, spawnSync } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 
 function hasCommand(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
@@ -250,10 +250,10 @@ async function main() {
     }
   }
   if (hasCommand("open")) {
-    const child = spawn("open", [verification_uri], { stdio: "ignore", detached: true });
-    child.on("error", () => {});
-    child.unref();
-    console.log("🌐 Opening browser...");
+    const r = spawnSync("open", [verification_uri], { stdio: "ignore" });
+    if (r.status === 0) {
+      console.log("🌐 Opening browser...");
+    }
   }
 
   console.log("\nWaiting for authorisation...");

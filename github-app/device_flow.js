@@ -17,7 +17,7 @@ const SLOW_DOWN_INCREMENT = 5;
 const TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30;
 const TOKEN_SUFFIX_LENGTH = 8;
 
-const { spawn, spawnSync } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 
 function hasCommand(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
@@ -195,10 +195,10 @@ async function main() {
     }
   }
   if (hasCommand("open")) {
-    const child = spawn("open", [verification_uri], { stdio: "ignore", detached: true });
-    child.on("error", () => {});
-    child.unref();
-    console.log("🌐 Opening browser...");
+    const r = spawnSync("open", [verification_uri], { stdio: "ignore" });
+    if (r.status === 0) {
+      console.log("🌐 Opening browser...");
+    }
   }
 
   console.log("\nWaiting for authorisation...");
