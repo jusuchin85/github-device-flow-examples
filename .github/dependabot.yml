@@ -9,3 +9,7 @@ updates:
     directory: "/github-app" # Location of package manifests
     schedule:
       interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/oauth-app"
+    schedule:
+      interval: "weekly"
