@@ -103,6 +103,8 @@ async function pollForToken(clientId, clientSecret, deviceCode, interval) {
       case "access_denied":
         throw new Error("User denied authorisation.");
       case undefined:
+      case null:
+      case "":
         throw new Error(
           "Received invalid response from GitHub (no access_token or error field)"
         );
