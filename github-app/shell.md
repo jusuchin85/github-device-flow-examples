@@ -91,7 +91,7 @@ SUCCESS!
 
 Token Type: bearer
 Scope: 
-Access Token: ghu_xxxxxxxxxxxx...xxxxxxxxxx
+Access Token: ghu_***xxxxxxxx
 
 Testing token by fetching user info...
 

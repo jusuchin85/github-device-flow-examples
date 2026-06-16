@@ -18,8 +18,7 @@ readonly SCRIPT_NAME="$(basename "$0")"
 readonly DEFAULT_POLL_INTERVAL=5
 readonly SLOW_DOWN_INCREMENT=5
 readonly TOKEN_MIN_LENGTH_FOR_TRUNCATION=30
-readonly TOKEN_PREFIX_LENGTH=20
-readonly TOKEN_SUFFIX_LENGTH=10
+readonly TOKEN_SUFFIX_LENGTH=8
 
 # Display usage information
 usage() {
@@ -160,7 +159,12 @@ echo "Token Type: $TOKEN_TYPE"
 echo "Scope: $SCOPE"
 TOKEN_LENGTH=${#ACCESS_TOKEN}
 if (( TOKEN_LENGTH >= TOKEN_MIN_LENGTH_FOR_TRUNCATION )); then
-    echo "Access Token: ${ACCESS_TOKEN:0:$TOKEN_PREFIX_LENGTH}...${ACCESS_TOKEN: -$TOKEN_SUFFIX_LENGTH}"
+    if [[ "$ACCESS_TOKEN" == *_* ]]; then
+        TOKEN_PREFIX="${ACCESS_TOKEN%%_*}_"
+    else
+        TOKEN_PREFIX="${ACCESS_TOKEN:0:4}"
+    fi
+    echo "Access Token: ${TOKEN_PREFIX}***${ACCESS_TOKEN: -$TOKEN_SUFFIX_LENGTH}"
 else
     echo "Access Token: $ACCESS_TOKEN"
 fi

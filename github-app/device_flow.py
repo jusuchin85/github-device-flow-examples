@@ -25,8 +25,7 @@ ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
 DEFAULT_POLL_INTERVAL = 5
 SLOW_DOWN_INCREMENT = 5
 TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30
-TOKEN_PREFIX_LENGTH = 20
-TOKEN_SUFFIX_LENGTH = 10
+TOKEN_SUFFIX_LENGTH = 8
 
 
 class DeviceFlowError(Exception):
@@ -217,8 +216,11 @@ def main() -> None:
     print(f"\nToken Type: {token_type}")
     print(f"Scope: {scope}")
     if len(access_token) >= TOKEN_MIN_LENGTH_FOR_TRUNCATION:
-        print(f"Access Token: {access_token[:TOKEN_PREFIX_LENGTH]}..."
-              f"{access_token[-TOKEN_SUFFIX_LENGTH:]}")
+        if "_" in access_token:
+            prefix = access_token.split("_", 1)[0] + "_"
+        else:
+            prefix = access_token[:4]
+        print(f"Access Token: {prefix}***{access_token[-TOKEN_SUFFIX_LENGTH:]}")
     else:
         print(f"Access Token: {access_token}")
 

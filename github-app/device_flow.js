@@ -15,8 +15,7 @@ const ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const DEFAULT_POLL_INTERVAL = 5;
 const SLOW_DOWN_INCREMENT = 5;
 const TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30;
-const TOKEN_PREFIX_LENGTH = 20;
-const TOKEN_SUFFIX_LENGTH = 10;
+const TOKEN_SUFFIX_LENGTH = 8;
 
 /**
  * Step 1: Request a device code from GitHub.
@@ -188,8 +187,11 @@ async function main() {
   console.log(`\nToken Type: ${token_type}`);
   console.log(`Scope: ${scope}`);
   if (access_token.length >= TOKEN_MIN_LENGTH_FOR_TRUNCATION) {
+    const prefix = access_token.includes("_")
+      ? access_token.split("_", 1)[0] + "_"
+      : access_token.slice(0, 4);
     console.log(
-      `Access Token: ${access_token.slice(0, TOKEN_PREFIX_LENGTH)}...${access_token.slice(-TOKEN_SUFFIX_LENGTH)}`
+      `Access Token: ${prefix}***${access_token.slice(-TOKEN_SUFFIX_LENGTH)}`
     );
   } else {
     console.log(`Access Token: ${access_token}`);

@@ -26,8 +26,7 @@ const (
 	defaultPollInterval          = 5
 	slowDownIncrement            = 5
 	tokenMinLengthForTruncation  = 30
-	tokenPrefixLength            = 20
-	tokenSuffixLength            = 10
+	tokenSuffixLength            = 8
 )
 
 // DeviceCodeResponse represents the response from the device code request.
@@ -236,8 +235,13 @@ func main() {
 	fmt.Printf("Scope: %s\n", tokenData.Scope)
 	tokenLen := len(tokenData.AccessToken)
 	if tokenLen >= tokenMinLengthForTruncation {
-		fmt.Printf("Access Token: %s...%s\n",
-			tokenData.AccessToken[:tokenPrefixLength],
+		var prefix string
+		if idx := strings.Index(tokenData.AccessToken, "_"); idx > 0 {
+			prefix = tokenData.AccessToken[:idx+1]
+		} else {
+			prefix = tokenData.AccessToken[:4]
+		}
+		fmt.Printf("Access Token: %s***%s\n", prefix,
 			tokenData.AccessToken[tokenLen-tokenSuffixLength:])
 	} else {
 		fmt.Printf("Access Token: %s\n", tokenData.AccessToken)
