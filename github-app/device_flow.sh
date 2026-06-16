@@ -79,7 +79,7 @@ echo ""
 echo "Requesting device code..."
 DEVICE_RESPONSE=$(curl -s -X POST "$DEVICE_CODE_URL" \
     -H "Accept: application/json" \
-    -d "client_id=$CLIENT_ID")
+    --data-urlencode "client_id=$CLIENT_ID")
 
 DEVICE_CODE=$(echo "$DEVICE_RESPONSE" | jq -r '.device_code')
 USER_CODE=$(echo "$DEVICE_RESPONSE" | jq -r '.user_code')
@@ -125,9 +125,9 @@ echo "Waiting for authorisation..."
 while true; do
     TOKEN_RESPONSE=$(curl -s -X POST "$ACCESS_TOKEN_URL" \
         -H "Accept: application/json" \
-        -d "client_id=$CLIENT_ID" \
-        -d "device_code=$DEVICE_CODE" \
-        -d "grant_type=urn:ietf:params:oauth:grant-type:device_code")
+        --data-urlencode "client_id=$CLIENT_ID" \
+        --data-urlencode "device_code=$DEVICE_CODE" \
+        --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code")
     
     ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
     ERROR=$(echo "$TOKEN_RESPONSE" | jq -r '.error')

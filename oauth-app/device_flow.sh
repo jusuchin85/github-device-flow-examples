@@ -29,6 +29,16 @@ readonly TOKEN_MIN_LENGTH_FOR_TRUNCATION=30
 readonly TOKEN_SUFFIX_LENGTH=8
 readonly DEFAULT_SCOPE="repo,read:org"
 
+# Trim leading and trailing whitespace only — internal whitespace is preserved
+# so a copy/paste like "abc def" still trips the regex check below instead of
+# being silently rewritten to "abcdef".
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 # Display usage information
 usage() {
     echo "Usage: $SCRIPT_NAME [options]"
@@ -77,11 +87,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Strip whitespace from env-loaded values (defensive — common copy-paste foot-gun
-# is a trailing newline or space that makes GitHub return a cryptic 'Not Found').
-CLIENT_ID="${CLIENT_ID//[[:space:]]/}"
-CLIENT_SECRET="${GITHUB_CLIENT_SECRET:-}"
-CLIENT_SECRET="${CLIENT_SECRET//[[:space:]]/}"
+# Trim trailing newlines/spaces from values (defensive — a common copy-paste
+# foot-gun is a trailing newline that makes GitHub return a cryptic
+# 'Not Found'). We only strip the ends so internal whitespace still trips the
+# regex check below.
+CLIENT_ID="$(trim "$CLIENT_ID")"
+CLIENT_SECRET="$(trim "${GITHUB_CLIENT_SECRET:-}")"
 
 # Validate Client ID
 if [[ -z "$CLIENT_ID" ]]; then
@@ -176,10 +187,10 @@ echo "Waiting for authorisation..."
 while true; do
     TOKEN_RESPONSE=$(curl -s -X POST "$ACCESS_TOKEN_URL" \
         -H "Accept: application/json" \
-        -d "client_id=$CLIENT_ID" \
-        -d "client_secret=$CLIENT_SECRET" \
-        -d "device_code=$DEVICE_CODE" \
-        -d "grant_type=urn:ietf:params:oauth:grant-type:device_code")
+        --data-urlencode "client_id=$CLIENT_ID" \
+        --data-urlencode "client_secret=$CLIENT_SECRET" \
+        --data-urlencode "device_code=$DEVICE_CODE" \
+        --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code")
 
     ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
     ERROR=$(echo "$TOKEN_RESPONSE" | jq -r '.error')
