@@ -203,7 +203,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    client_id = args.client_id
+    client_id = (args.client_id or "").strip()
     if not client_id:
         parser.error(
             "Client ID required. Use --client-id or set "
@@ -227,7 +227,7 @@ def main() -> None:
             "   shell history, ps output, and audit logs."
         )
 
-    scope = args.scope
+    scope = args.scope.strip()
 
     print("=" * 50)
     print("OAuth App Device Flow - User Access Token")

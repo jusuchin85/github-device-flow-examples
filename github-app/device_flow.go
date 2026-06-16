@@ -228,7 +228,7 @@ func main() {
 		}
 	}
 	if _, err := exec.LookPath("open"); err == nil {
-		if err := exec.Command("open", deviceData.VerificationURI).Start(); err == nil {
+		if err := exec.Command("open", deviceData.VerificationURI).Run(); err == nil {
 			fmt.Println("🌐 Opening browser...")
 		}
 	}

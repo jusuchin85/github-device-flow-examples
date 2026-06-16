@@ -121,7 +121,7 @@ async function testToken(accessToken) {
  */
 function parseArgs() {
   const args = process.argv.slice(2);
-  let clientId = process.env.GITHUB_CLIENT_ID;
+  let clientId = (process.env.GITHUB_CLIENT_ID || "").trim();
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--client-id" || args[i] === "-c") {
@@ -132,7 +132,7 @@ function parseArgs() {
         );
         process.exit(1);
       }
-      clientId = next;
+      clientId = next.trim();
       i++;
     } else if (args[i] === "--help" || args[i] === "-h") {
       console.log(`

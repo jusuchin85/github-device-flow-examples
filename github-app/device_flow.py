@@ -169,18 +169,17 @@ def main() -> None:
     )
     parser.add_argument(
         "-c", "--client-id",
-        default=os.environ.get("GITHUB_CLIENT_ID"),
+        default=os.environ.get("GITHUB_CLIENT_ID", "").strip(),
         help="GitHub App Client ID (or set GITHUB_CLIENT_ID env var)",
     )
     args = parser.parse_args()
 
-    if not args.client_id:
+    client_id = (args.client_id or "").strip()
+    if not client_id:
         parser.error(
             "Client ID required. Use --client-id or set "
             "GITHUB_CLIENT_ID env var."
         )
-
-    client_id = args.client_id
 
     print("=" * 50)
     print("GitHub Device Flow - User Access Token")

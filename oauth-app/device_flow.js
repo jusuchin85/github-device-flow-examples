@@ -149,7 +149,7 @@ function parseArgs() {
         );
         process.exit(1);
       }
-      clientId = next;
+      clientId = next.trim();
       i++;
     } else if (args[i] === "--scope" || args[i] === "-s") {
       const next = args[i + 1];
@@ -159,7 +159,7 @@ function parseArgs() {
         );
         process.exit(1);
       }
-      scope = next;
+      scope = next.trim();
       i++;
     } else if (args[i] === "--help" || args[i] === "-h") {
       console.log(`
