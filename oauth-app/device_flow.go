@@ -12,6 +12,7 @@
 //   - You need scopes (granular permissions are a GitHub App concept).
 //   - You need a non-expiring user token by default.
 //   - You're integrating with an existing OAuth-only flow.
+//
 // For most modern use cases, GitHub Apps are preferred. See the sibling
 // github-app/ subdir.
 package main
@@ -232,6 +233,9 @@ func main() {
 	// Merge --scope / -s flags; default if neither provided
 	if scope == "" && scopeShort != "" {
 		scope = scopeShort
+	} else if scope != "" && scopeShort != "" && scope != scopeShort {
+		fmt.Fprintln(os.Stderr, "Error: Both --scope and -s provided with different values. Use one or the other.")
+		os.Exit(1)
 	}
 	if scope == "" {
 		scope = defaultScope
@@ -274,8 +278,8 @@ func main() {
 	fmt.Println()
 
 	// Auto-open browser and copy code to clipboard (macOS-only). Both are
-	// graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
-	// headless CI, SSH sessions, etc.).
+	// graceful no-ops on non-macOS systems (Linux, BSD, headless CI, SSH
+	// sessions, etc.) since they only check for `open` and `pbcopy`.
 	if _, err := exec.LookPath("pbcopy"); err == nil {
 		cmd := exec.Command("pbcopy")
 		cmd.Stdin = strings.NewReader(deviceData.UserCode)
@@ -306,7 +310,11 @@ func main() {
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("SUCCESS!")
 	fmt.Println(strings.Repeat("=", 50))
-	fmt.Printf("\nToken Type:    %s\n", tokenData.TokenType)
+	tokenType := tokenData.TokenType
+	if tokenType == "" {
+		tokenType = "bearer"
+	}
+	fmt.Printf("\nToken Type:    %s\n", tokenType)
 	fmt.Printf("Granted Scope: %s\n", tokenData.Scope)
 	tokenLen := len(tokenData.AccessToken)
 	if tokenLen >= tokenMinLengthForTruncation {

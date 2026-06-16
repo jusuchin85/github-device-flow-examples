@@ -129,7 +129,8 @@ echo ""
 echo "Requesting device code..."
 DEVICE_RESPONSE=$(curl -s -X POST "$DEVICE_CODE_URL" \
     -H "Accept: application/json" \
-    -d "client_id=$CLIENT_ID&scope=$SCOPE")
+    --data-urlencode "client_id=$CLIENT_ID" \
+    --data-urlencode "scope=$SCOPE")
 
 DEVICE_CODE=$(echo "$DEVICE_RESPONSE" | jq -r '.device_code')
 USER_CODE=$(echo "$DEVICE_RESPONSE" | jq -r '.user_code')

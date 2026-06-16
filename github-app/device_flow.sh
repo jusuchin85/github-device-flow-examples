@@ -103,8 +103,8 @@ echo "2. Enter code: $USER_CODE"
 echo ""
 
 # Auto-open browser and copy code to clipboard (macOS-only). Both are
-# graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
-# headless CI, SSH sessions, etc.).
+# graceful no-ops on non-macOS systems (Linux, BSD, headless CI, SSH
+# sessions, etc.) since they only check for `open` and `pbcopy`.
 if command -v pbcopy >/dev/null 2>&1; then
     printf '%s' "$USER_CODE" | pbcopy
     echo "📋 Code copied to clipboard."

@@ -184,8 +184,8 @@ async function main() {
   console.log();
 
   // Auto-open browser and copy code to clipboard (macOS-only). Both are
-  // graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
-  // headless CI, SSH sessions, etc.).
+  // graceful no-ops on non-macOS systems (Linux, BSD, headless CI, SSH
+  // sessions, etc.) since they only check for `open` and `pbcopy`.
   if (hasCommand("pbcopy")) {
     spawnSync("pbcopy", { input: user_code });
     console.log("📋 Code copied to clipboard.");

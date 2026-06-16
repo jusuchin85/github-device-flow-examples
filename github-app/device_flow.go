@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	deviceCodeURL                = "https://github.com/login/device/code"
-	accessTokenURL               = "https://github.com/login/oauth/access_token"
-	defaultPollInterval          = 5
-	slowDownIncrement            = 5
-	tokenMinLengthForTruncation  = 30
-	tokenSuffixLength            = 8
+	deviceCodeURL               = "https://github.com/login/device/code"
+	accessTokenURL              = "https://github.com/login/oauth/access_token"
+	defaultPollInterval         = 5
+	slowDownIncrement           = 5
+	tokenMinLengthForTruncation = 30
+	tokenSuffixLength           = 8
 )
 
 // DeviceCodeResponse represents the response from the device code request.
@@ -218,8 +218,8 @@ func main() {
 	fmt.Println()
 
 	// Auto-open browser and copy code to clipboard (macOS-only). Both are
-	// graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
-	// headless CI, SSH sessions, etc.).
+	// graceful no-ops on non-macOS systems (Linux, BSD, headless CI, SSH
+	// sessions, etc.) since they only check for `open` and `pbcopy`.
 	if _, err := exec.LookPath("pbcopy"); err == nil {
 		cmd := exec.Command("pbcopy")
 		cmd.Stdin = strings.NewReader(deviceData.UserCode)
