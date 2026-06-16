@@ -186,9 +186,13 @@ async function main() {
   // Auto-open browser and copy code to clipboard (macOS-only). Both are
   // graceful no-ops on non-macOS systems (Linux, BSD, headless CI, SSH
   // sessions, etc.) since they only check for `open` and `pbcopy`.
+  // Pbcopy success is gated on exit status so we don't claim "copied"
+  // when the subprocess fails (e.g. permission denied in restricted CI).
   if (hasCommand("pbcopy")) {
-    spawnSync("pbcopy", { input: user_code });
-    console.log("📋 Code copied to clipboard.");
+    const r = spawnSync("pbcopy", { input: user_code });
+    if (r.status === 0) {
+      console.log("📋 Code copied to clipboard.");
+    }
   }
   if (hasCommand("open")) {
     const child = spawn("open", [verification_uri], { stdio: "ignore", detached: true });

@@ -257,9 +257,12 @@ def main() -> None:
     # Auto-open browser via stdlib (cross-platform) and copy code to
     # clipboard via pbcopy (macOS-only). Both are graceful no-ops where
     # unsupported (Linux without pbcopy, headless CI, SSH sessions, etc.).
+    # Success messages are gated on the underlying call so we don't claim
+    # "copied" / "opening" when the tool fails.
     if shutil.which("pbcopy"):
-        subprocess.run(["pbcopy"], input=user_code, text=True, check=False)
-        print("📋 Code copied to clipboard.")
+        result = subprocess.run(["pbcopy"], input=user_code, text=True, check=False)
+        if result.returncode == 0:
+            print("📋 Code copied to clipboard.")
     if webbrowser.open(verification_uri, new=2):
         print("🌐 Opening browser...")
 

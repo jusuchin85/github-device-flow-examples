@@ -155,14 +155,17 @@ echo ""
 
 # macOS polish: auto-open the verification URL in the default browser and
 # copy the user code to the clipboard. Both are graceful no-ops on Linux,
-# Codespaces, SSH sessions, etc.
+# Codespaces, SSH sessions, etc. — and we gate the success messages on
+# command success so we don't claim "copied" when pbcopy fails.
 if command -v pbcopy >/dev/null 2>&1; then
-    printf '%s' "$USER_CODE" | pbcopy
-    echo "📋 Code copied to clipboard."
+    if printf '%s' "$USER_CODE" | pbcopy 2>/dev/null; then
+        echo "📋 Code copied to clipboard."
+    fi
 fi
 if command -v open >/dev/null 2>&1; then
-    open "$VERIFICATION_URI" 2>/dev/null || true
-    echo "🌐 Opening browser..."
+    if open "$VERIFICATION_URI" 2>/dev/null; then
+        echo "🌐 Opening browser..."
+    fi
 fi
 
 echo ""
