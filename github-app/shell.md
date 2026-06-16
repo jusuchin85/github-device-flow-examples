@@ -123,4 +123,4 @@ echo "Token stored in \$GITHUB_USER_TOKEN"
 
 ## Troubleshooting
 
-See [Common Issues](common-issues.md) for troubleshooting help.
+See [Common Issues](../common-issues.md) for troubleshooting help.

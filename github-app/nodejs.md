@@ -116,4 +116,4 @@ curl -H "Authorization: Bearer $GITHUB_USER_TOKEN" https://api.github.com/user
 
 ## Troubleshooting
 
-See [Common Issues](common-issues.md) for troubleshooting help.
+See [Common Issues](../common-issues.md) for troubleshooting help.
