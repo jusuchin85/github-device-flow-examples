@@ -12,8 +12,11 @@ may expose it in logs or shell history.
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 import time
+import webbrowser
 
 import requests
 
@@ -201,6 +204,17 @@ def main() -> None:
     print("=" * 50)
     print(f"\n1. Go to: {verification_uri}")
     print(f"2. Enter code: {user_code}")
+    print()
+
+    # Auto-open browser via stdlib (cross-platform) and copy code to
+    # clipboard via pbcopy (macOS-only). Both are graceful no-ops where
+    # unsupported (Linux without pbcopy, headless CI, SSH sessions, etc.).
+    if shutil.which("pbcopy"):
+        subprocess.run(["pbcopy"], input=user_code, text=True, check=False)
+        print("📋 Code copied to clipboard.")
+    if webbrowser.open(verification_uri, new=2):
+        print("🌐 Opening browser...")
+
     print("\nWaiting for authorisation...")
 
     # Step 3: Poll for token

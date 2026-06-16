@@ -101,6 +101,20 @@ echo ""
 echo "1. Go to: $VERIFICATION_URI"
 echo "2. Enter code: $USER_CODE"
 echo ""
+
+# Auto-open browser and copy code to clipboard (macOS-only). Both are
+# graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
+# headless CI, SSH sessions, etc.).
+if command -v pbcopy >/dev/null 2>&1; then
+    printf '%s' "$USER_CODE" | pbcopy
+    echo "📋 Code copied to clipboard."
+fi
+if command -v open >/dev/null 2>&1; then
+    open "$VERIFICATION_URI" 2>/dev/null || true
+    echo "🌐 Opening browser..."
+fi
+
+echo ""
 echo "Waiting for authorisation..."
 
 # Step 3: Poll for token

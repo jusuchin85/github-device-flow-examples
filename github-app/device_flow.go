@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -214,6 +215,24 @@ func main() {
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Printf("\n1. Go to: %s\n", deviceData.VerificationURI)
 	fmt.Printf("2. Enter code: %s\n", deviceData.UserCode)
+	fmt.Println()
+
+	// Auto-open browser and copy code to clipboard (macOS-only). Both are
+	// graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
+	// headless CI, SSH sessions, etc.).
+	if _, err := exec.LookPath("pbcopy"); err == nil {
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(deviceData.UserCode)
+		if err := cmd.Run(); err == nil {
+			fmt.Println("📋 Code copied to clipboard.")
+		}
+	}
+	if _, err := exec.LookPath("open"); err == nil {
+		if err := exec.Command("open", deviceData.VerificationURI).Start(); err == nil {
+			fmt.Println("🌐 Opening browser...")
+		}
+	}
+
 	fmt.Println("\nWaiting for authorisation...")
 
 	// Step 3: Poll for token

@@ -17,6 +17,13 @@ const SLOW_DOWN_INCREMENT = 5;
 const TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30;
 const TOKEN_SUFFIX_LENGTH = 8;
 
+const { spawn, spawnSync } = require("node:child_process");
+
+function hasCommand(cmd) {
+  const r = spawnSync("which", [cmd], { stdio: "ignore" });
+  return r.status === 0;
+}
+
 /**
  * Step 1: Request a device code from GitHub.
  */
@@ -174,6 +181,22 @@ async function main() {
   console.log("=".repeat(50));
   console.log(`\n1. Go to: ${verification_uri}`);
   console.log(`2. Enter code: ${user_code}`);
+  console.log();
+
+  // Auto-open browser and copy code to clipboard (macOS-only). Both are
+  // graceful no-ops where unsupported (Linux without xdg-open / pbcopy,
+  // headless CI, SSH sessions, etc.).
+  if (hasCommand("pbcopy")) {
+    spawnSync("pbcopy", { input: user_code });
+    console.log("📋 Code copied to clipboard.");
+  }
+  if (hasCommand("open")) {
+    const child = spawn("open", [verification_uri], { stdio: "ignore", detached: true });
+    child.on("error", () => {});
+    child.unref();
+    console.log("🌐 Opening browser...");
+  }
+
   console.log("\nWaiting for authorisation...");
 
   // Step 3: Poll for token

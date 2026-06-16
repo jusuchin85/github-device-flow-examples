@@ -105,6 +105,9 @@ ACTION REQUIRED
 1. Open: https://github.com/login/device
 2. Enter code: XXXX-XXXX
 
+📋 Code copied to clipboard.
+🌐 Opening browser...
+
 Waiting for authorisation...
 
 ==================================================

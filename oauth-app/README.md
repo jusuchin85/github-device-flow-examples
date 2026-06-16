@@ -71,7 +71,7 @@ Each language has a dedicated guide with full setup, examples, and gotchas:
 
 | Guide | Description |
 |---|---|
-| [shell.md](shell.md) | Bash usage with macOS auto-open + clipboard polish |
+| [shell.md](shell.md) | Bash usage with `curl` and `jq` |
 | [python.md](python.md) | Python with `requests` + virtualenv |
 | [nodejs.md](nodejs.md) | Native `fetch`, no dependencies |
 | [go.md](go.md) | Standard library only, no dependencies |
