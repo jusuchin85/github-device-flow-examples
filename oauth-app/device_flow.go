@@ -1,11 +1,20 @@
-// GitHub App Device Flow - User-to-Server Token Generation
+// OAuth App Device Flow - User Access Token Generation
 //
 // This script demonstrates how to obtain a user access token using the
-// OAuth Device Flow, which is ideal for CLI applications.
+// OAuth Device Flow with an OAuth App, which is ideal for CLI applications
+// that need user-attributed access without standing up a web server.
 //
 // WARNING: This script is for demonstration and testing purposes only.
 // Do not use in production. The access token is printed to stdout which
 // may expose it in logs or shell history.
+//
+// Why an OAuth App and not a GitHub App?
+//   - You need scopes (granular permissions are a GitHub App concept).
+//   - You need a non-expiring user token by default.
+//   - You're integrating with an existing OAuth-only flow.
+//
+// For most modern use cases, GitHub Apps are preferred. See the sibling
+// github-app/ subdir.
 package main
 
 import (
@@ -16,19 +25,23 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const (
-	deviceCodeURL                = "https://github.com/login/device/code"
-	accessTokenURL               = "https://github.com/login/oauth/access_token"
-	defaultPollInterval          = 5
-	slowDownIncrement            = 5
-	tokenMinLengthForTruncation  = 30
-	tokenPrefixLength            = 20
-	tokenSuffixLength            = 10
+	deviceCodeURL               = "https://github.com/login/device/code"
+	accessTokenURL              = "https://github.com/login/oauth/access_token"
+	defaultPollInterval         = 5
+	slowDownIncrement           = 5
+	tokenMinLengthForTruncation = 30
+	tokenSuffixLength           = 8
+	defaultScope                = "repo,read:org"
 )
+
+var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // DeviceCodeResponse represents the response from the device code request.
 type DeviceCodeResponse struct {
@@ -41,10 +54,11 @@ type DeviceCodeResponse struct {
 
 // TokenResponse represents the response from the token exchange request.
 type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	Scope       string `json:"scope"`
-	Error       string `json:"error"`
+	AccessToken      string `json:"access_token"`
+	TokenType        string `json:"token_type"`
+	Scope            string `json:"scope"`
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
 }
 
 // UserInfo represents the authenticated user's information.
@@ -54,9 +68,13 @@ type UserInfo struct {
 	Email *string `json:"email"`
 }
 
-// requestDeviceCode requests a device code from GitHub.
-func requestDeviceCode(clientID string) (*DeviceCodeResponse, error) {
-	data := url.Values{"client_id": {clientID}}
+// requestDeviceCode requests a device code from GitHub. Includes scope
+// (OAuth App-specific — GitHub Apps use installation permissions).
+func requestDeviceCode(clientID, scope string) (*DeviceCodeResponse, error) {
+	data := url.Values{
+		"client_id": {clientID},
+		"scope":     {scope},
+	}
 
 	req, err := http.NewRequest("POST", deviceCodeURL, strings.NewReader(data.Encode()))
 	if err != nil {
@@ -85,11 +103,14 @@ func requestDeviceCode(clientID string) (*DeviceCodeResponse, error) {
 }
 
 // pollForToken polls GitHub until the user authorizes or an error occurs.
-func pollForToken(clientID, deviceCode string, interval int) (*TokenResponse, error) {
+// OAuth Apps are confidential clients, so the token exchange requires
+// the client_secret in addition to the device_code.
+func pollForToken(clientID, clientSecret, deviceCode string, interval int) (*TokenResponse, error) {
 	data := url.Values{
-		"client_id":   {clientID},
-		"device_code": {deviceCode},
-		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"device_code":   {deviceCode},
+		"grant_type":    {"urn:ietf:params:oauth:grant-type:device_code"},
 	}
 
 	for {
@@ -136,7 +157,11 @@ func pollForToken(clientID, deviceCode string, interval int) (*TokenResponse, er
 		case "":
 			return nil, fmt.Errorf("received invalid response from GitHub (no access_token or error field)")
 		default:
-			return nil, fmt.Errorf("unexpected error: %s", result.Error)
+			description := result.ErrorDescription
+			if description == "" {
+				description = result.Error
+			}
+			return nil, fmt.Errorf("unexpected error: %s", description)
 		}
 	}
 }
@@ -170,13 +195,14 @@ func testToken(accessToken string) (*UserInfo, error) {
 }
 
 func main() {
-	var clientID string
-	var clientIDShort string
-	flag.StringVar(&clientID, "client-id", "", "GitHub App Client ID")
-	flag.StringVar(&clientIDShort, "c", "", "GitHub App Client ID (shorthand)")
+	var clientID, clientIDShort, scope, scopeShort string
+	flag.StringVar(&clientID, "client-id", "", "OAuth App Client ID")
+	flag.StringVar(&clientIDShort, "c", "", "OAuth App Client ID (shorthand)")
+	flag.StringVar(&scope, "scope", "", fmt.Sprintf("Comma-separated OAuth scopes (default: %q)", defaultScope))
+	flag.StringVar(&scopeShort, "s", "", "Comma-separated OAuth scopes (shorthand)")
 	flag.Parse()
 
-	// Merge flags: if both provided, prefer long form; otherwise use whichever is set
+	// Merge --client-id / -c flags
 	if clientID == "" && clientIDShort != "" {
 		clientID = clientIDShort
 	} else if clientID != "" && clientIDShort != "" && clientID != clientIDShort {
@@ -184,25 +210,60 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Fall back to environment variable if no flag provided
+	// Fall back to env var if no flag provided
 	if clientID == "" {
 		clientID = os.Getenv("GITHUB_CLIENT_ID")
 	}
+	clientID = strings.TrimSpace(clientID)
 
 	if clientID == "" {
 		fmt.Fprintln(os.Stderr, "Error: Client ID required. Use --client-id or set GITHUB_CLIENT_ID env var.")
 		os.Exit(1)
 	}
 
+	if !clientIDPattern.MatchString(clientID) {
+		fmt.Fprintf(os.Stderr,
+			"Error: GITHUB_CLIENT_ID contains unexpected characters.\n"+
+				"   Got: [%s] (%d chars)\n"+
+				"   Re-export cleanly to fail fast on stray prefixes.\n",
+			clientID, len(clientID))
+		os.Exit(1)
+	}
+
+	// Merge --scope / -s flags; default if neither provided
+	if scope == "" && scopeShort != "" {
+		scope = scopeShort
+	} else if scope != "" && scopeShort != "" && scope != scopeShort {
+		fmt.Fprintln(os.Stderr, "Error: Both --scope and -s provided with different values. Use one or the other.")
+		os.Exit(1)
+	}
+	if scope == "" {
+		scope = defaultScope
+	}
+	scope = strings.TrimSpace(scope)
+
+	// Client secret is env-var only — never a flag
+	clientSecret := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET"))
+	if clientSecret == "" {
+		fmt.Fprintln(os.Stderr,
+			"Error: GITHUB_CLIENT_SECRET env var is required for OAuth Apps.\n"+
+				"   Export it before running:\n"+
+				"     export GITHUB_CLIENT_SECRET='your-secret'\n"+
+				"   We never accept secrets via CLI flags — they leak to shell\n"+
+				"   history, ps output, and audit logs.")
+		os.Exit(1)
+	}
+
 	fmt.Println(strings.Repeat("=", 50))
-	fmt.Println("GitHub Device Flow - User Access Token")
+	fmt.Println("OAuth App Device Flow - User Access Token")
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("\n⚠️  WARNING: For demonstration/testing only. Not for production use.")
-	fmt.Printf("\nClient ID: %s\n\n", clientID)
+	fmt.Printf("\nClient ID: %s\n", clientID)
+	fmt.Printf("Scope:     %s\n\n", scope)
 
 	// Step 1: Get device code
 	fmt.Println("Requesting device code...")
-	deviceData, err := requestDeviceCode(clientID)
+	deviceData, err := requestDeviceCode(clientID, scope)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -213,8 +274,26 @@ func main() {
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("ACTION REQUIRED")
 	fmt.Println(strings.Repeat("=", 50))
-	fmt.Printf("\n1. Go to: %s\n", deviceData.VerificationURI)
+	fmt.Printf("\n1. Open: %s\n", deviceData.VerificationURI)
 	fmt.Printf("2. Enter code: %s\n", deviceData.UserCode)
+	fmt.Println()
+
+	// Auto-open browser and copy code to clipboard (macOS-only). Both are
+	// graceful no-ops on non-macOS systems (Linux, BSD, headless CI, SSH
+	// sessions, etc.) since they only check for `open` and `pbcopy`.
+	if _, err := exec.LookPath("pbcopy"); err == nil {
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(deviceData.UserCode)
+		if err := cmd.Run(); err == nil {
+			fmt.Println("📋 Code copied to clipboard.")
+		}
+	}
+	if _, err := exec.LookPath("open"); err == nil {
+		if err := exec.Command("open", deviceData.VerificationURI).Run(); err == nil {
+			fmt.Println("🌐 Opening browser...")
+		}
+	}
+
 	fmt.Println("\nWaiting for authorisation...")
 
 	// Step 3: Poll for token
@@ -222,7 +301,7 @@ func main() {
 	if interval == 0 {
 		interval = defaultPollInterval
 	}
-	tokenData, err := pollForToken(clientID, deviceData.DeviceCode, interval)
+	tokenData, err := pollForToken(clientID, clientSecret, deviceData.DeviceCode, interval)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -232,15 +311,24 @@ func main() {
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("SUCCESS!")
 	fmt.Println(strings.Repeat("=", 50))
-	fmt.Printf("\nToken Type: %s\n", tokenData.TokenType)
-	fmt.Printf("Scope: %s\n", tokenData.Scope)
+	tokenType := tokenData.TokenType
+	if tokenType == "" {
+		tokenType = "bearer"
+	}
+	fmt.Printf("\nToken Type:    %s\n", tokenType)
+	fmt.Printf("Granted Scope: %s\n", tokenData.Scope)
 	tokenLen := len(tokenData.AccessToken)
 	if tokenLen >= tokenMinLengthForTruncation {
-		fmt.Printf("Access Token: %s...%s\n",
-			tokenData.AccessToken[:tokenPrefixLength],
+		var prefix string
+		if idx := strings.Index(tokenData.AccessToken, "_"); idx > 0 {
+			prefix = tokenData.AccessToken[:idx+1]
+		} else {
+			prefix = tokenData.AccessToken[:4]
+		}
+		fmt.Printf("Access Token:  %s***%s\n", prefix,
 			tokenData.AccessToken[tokenLen-tokenSuffixLength:])
 	} else {
-		fmt.Printf("Access Token: %s\n", tokenData.AccessToken)
+		fmt.Printf("Access Token:  %s\n", tokenData.AccessToken)
 	}
 
 	// Step 4: Test the token
@@ -253,14 +341,14 @@ func main() {
 
 	fmt.Printf("\nAuthenticated as: %s\n", userInfo.Login)
 	if userInfo.Name != nil {
-		fmt.Printf("Name: %s\n", *userInfo.Name)
+		fmt.Printf("Name:             %s\n", *userInfo.Name)
 	} else {
-		fmt.Println("Name: N/A")
+		fmt.Println("Name:             N/A")
 	}
 	if userInfo.Email != nil {
-		fmt.Printf("Email: %s\n", *userInfo.Email)
+		fmt.Printf("Email:            %s\n", *userInfo.Email)
 	} else {
-		fmt.Println("Email: N/A")
+		fmt.Println("Email:            N/A")
 	}
 
 	// NOTE: Printing the full token is intentional for demo/testing purposes.

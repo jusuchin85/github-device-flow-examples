@@ -1,26 +1,23 @@
-# Node.js Usage Guide
+# Python Usage Guide
 
-Complete guide to using the Node.js Device Flow script for generating
+Complete guide to using the Python Device Flow script for generating
 GitHub App user access tokens.
 
 ## Prerequisites
 
-### Node.js 18+
+### Python 3.8+
 
-The script uses the built-in `fetch` API (available in Node 18+). No
-external dependencies required!
-
-Check if Node.js is installed:
+Check if Python is installed:
 
 ```bash
-node --version
+python3 --version
 ```
 
 If not installed:
 
-- **macOS**: `brew install node`
-- **Ubuntu/Debian**: See [NodeSource](https://github.com/nodesource/distributions)
-- **Windows**: Download from [nodejs.org](https://nodejs.org/)
+- **macOS**: `brew install python3`
+- **Ubuntu/Debian**: `sudo apt install python3 python3-venv`
+- **Windows**: Download from [python.org](https://www.python.org/downloads/)
 
 ### GitHub App
 
@@ -32,33 +29,57 @@ Your GitHub App must have:
 
 ## Setup
 
-No setup required! The script has zero dependencies.
+### 1. Create a Virtual Environment
+
+```bash
+python3 -m venv .venv
+```
+
+### 2. Activate the Virtual Environment
+
+**macOS/Linux:**
+
+```bash
+source .venv/bin/activate
+```
+
+**Windows:**
+
+```powershell
+.venv\Scripts\activate
+```
+
+### 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Running the Script
 
 ### Using Command Line Argument
 
 ```bash
-node device_flow.js --client-id YOUR_CLIENT_ID
+python device_flow.py --client-id YOUR_CLIENT_ID
 ```
 
 Or using the short flag:
 
 ```bash
-node device_flow.js -c YOUR_CLIENT_ID
+python device_flow.py -c YOUR_CLIENT_ID
 ```
 
 ### Using Environment Variable
 
 ```bash
 export GITHUB_CLIENT_ID=YOUR_CLIENT_ID
-node device_flow.js
+python device_flow.py
 ```
 
 ### Show Help
 
 ```bash
-node device_flow.js --help
+python device_flow.py --help
 ```
 
 ## Example Session
@@ -79,6 +100,9 @@ ACTION REQUIRED
 1. Go to: https://github.com/login/device
 2. Enter code: XXXX-XXXX
 
+📋 Code copied to clipboard.
+🌐 Opening browser...
+
 Waiting for authorisation...
 
 ==================================================
@@ -87,7 +111,7 @@ SUCCESS!
 
 Token Type: bearer
 Scope: 
-Access Token: ghu_xxxxxxxxxxxx...xxxxxxxxxx
+Access Token: ghu_***xxxxxxxx
 
 Testing token by fetching user info...
 
@@ -108,12 +132,20 @@ capture for use in other scripts or store as an environment variable:
 
 ```bash
 # Capture token into an environment variable
-export GITHUB_USER_TOKEN=$(node device_flow.js -c YOUR_CLIENT_ID | tail -1)
+export GITHUB_USER_TOKEN=$(python device_flow.py -c YOUR_CLIENT_ID | tail -1)
 
 # Use the token
 curl -H "Authorization: Bearer $GITHUB_USER_TOKEN" https://api.github.com/user
 ```
 
+## Deactivating the Virtual Environment
+
+When done:
+
+```bash
+deactivate
+```
+
 ## Troubleshooting
 
-See [Common Issues](common-issues.md) for troubleshooting help.
+See [Common Issues](../common-issues.md) for troubleshooting help.

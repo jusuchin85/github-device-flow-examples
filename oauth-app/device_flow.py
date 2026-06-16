@@ -1,32 +1,42 @@
 #!/usr/bin/env python3
 """
-GitHub App Device Flow - User-to-Server Token Generation.
+OAuth App Device Flow - User Access Token Generation.
 
 This script demonstrates how to obtain a user access token using the
-OAuth Device Flow, which is ideal for CLI applications.
+OAuth Device Flow with an OAuth App, which is ideal for CLI applications
+that need user-attributed access without standing up a web server.
 
 WARNING: This script is for demonstration and testing purposes only.
 Do not use in production. The access token is printed to stdout which
 may expose it in logs or shell history.
+
+Why an OAuth App and not a GitHub App?
+  - You need scopes (granular permissions are a GitHub App concept).
+  - You need a non-expiring user token by default.
+  - You're integrating with an existing OAuth-only flow.
+For most modern use cases, GitHub Apps are preferred. See the sibling
+github-app/ subdir.
 """
 
 import argparse
 import os
+import re
+import shutil
+import subprocess
 import sys
 import time
+import webbrowser
 
 import requests
-
-# Note: For GitHub Apps, permissions are defined in the App's settings,
-# not requested via scope parameter (that's for OAuth Apps only).
 
 DEVICE_CODE_URL = "https://github.com/login/device/code"
 ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
 DEFAULT_POLL_INTERVAL = 5
 SLOW_DOWN_INCREMENT = 5
 TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30
-TOKEN_PREFIX_LENGTH = 20
-TOKEN_SUFFIX_LENGTH = 10
+TOKEN_SUFFIX_LENGTH = 8
+DEFAULT_SCOPE = "repo,read:org"
+CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class DeviceFlowError(Exception):
@@ -47,14 +57,16 @@ class AuthorizationDeniedError(DeviceFlowError):
     pass
 
 
-def request_device_code(client_id: str) -> dict:
+def request_device_code(client_id: str, scope: str) -> dict:
     """
     Request a device code from GitHub.
 
     Parameters
     ----------
     client_id : str
-        The GitHub App's Client ID.
+        The OAuth App's Client ID.
+    scope : str
+        Comma-separated OAuth scopes (e.g., "repo,read:org").
 
     Returns
     -------
@@ -63,21 +75,28 @@ def request_device_code(client_id: str) -> dict:
     """
     response = requests.post(
         DEVICE_CODE_URL,
-        data={"client_id": client_id},
+        data={"client_id": client_id, "scope": scope},
         headers={"Accept": "application/json"},
     )
     response.raise_for_status()
     return response.json()
 
 
-def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
+def poll_for_token(
+    client_id: str, client_secret: str, device_code: str, interval: int
+) -> dict:
     """
     Poll GitHub until the user authorizes or an error occurs.
+
+    OAuth Apps are confidential clients, so the token exchange requires
+    the client_secret in addition to the device_code.
 
     Parameters
     ----------
     client_id : str
-        The GitHub App's Client ID.
+        The OAuth App's Client ID.
+    client_secret : str
+        The OAuth App's Client Secret.
     device_code : str
         The device code from the initial request.
     interval : int
@@ -102,6 +121,7 @@ def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
             ACCESS_TOKEN_URL,
             data={
                 "client_id": client_id,
+                "client_secret": client_secret,
                 "device_code": device_code,
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             },
@@ -132,7 +152,8 @@ def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
                 "Received invalid response from GitHub (no access_token or error field)"
             )
         else:
-            raise DeviceFlowError(f"Unexpected error: {error}")
+            description = data.get("error_description", error)
+            raise DeviceFlowError(f"Unexpected error: {description}")
 
 
 def test_token(access_token: str) -> dict:
@@ -163,33 +184,62 @@ def test_token(access_token: str) -> dict:
 def main() -> None:
     """Run the Device Flow authentication process."""
     parser = argparse.ArgumentParser(
-        description="GitHub App Device Flow - User Access Token"
+        description="OAuth App Device Flow - User Access Token",
+        epilog=(
+            "GITHUB_CLIENT_SECRET must be set as an environment variable. "
+            "We never accept secrets via CLI flags because flags leak to "
+            "shell history, ps output, and audit logs."
+        ),
     )
     parser.add_argument(
         "-c", "--client-id",
-        default=os.environ.get("GITHUB_CLIENT_ID"),
-        help="GitHub App Client ID (or set GITHUB_CLIENT_ID env var)",
+        default=os.environ.get("GITHUB_CLIENT_ID", "").strip(),
+        help="OAuth App Client ID (or set GITHUB_CLIENT_ID env var)",
+    )
+    parser.add_argument(
+        "-s", "--scope",
+        default=DEFAULT_SCOPE,
+        help=f"Comma-separated OAuth scopes (default: {DEFAULT_SCOPE})",
     )
     args = parser.parse_args()
 
-    if not args.client_id:
+    client_id = (args.client_id or "").strip()
+    if not client_id:
         parser.error(
             "Client ID required. Use --client-id or set "
             "GITHUB_CLIENT_ID env var."
         )
 
-    client_id = args.client_id
+    if not CLIENT_ID_PATTERN.match(client_id):
+        parser.error(
+            f"GITHUB_CLIENT_ID contains unexpected characters.\n"
+            f"   Got: [{client_id}] ({len(client_id)} chars)\n"
+            f"   Re-export cleanly to fail fast on stray prefixes."
+        )
+
+    client_secret = os.environ.get("GITHUB_CLIENT_SECRET", "").strip()
+    if not client_secret:
+        parser.error(
+            "GITHUB_CLIENT_SECRET env var is required for OAuth Apps.\n"
+            "   Export it before running:\n"
+            "     export GITHUB_CLIENT_SECRET='your-secret'\n"
+            "   We never accept secrets via CLI flags — they leak to\n"
+            "   shell history, ps output, and audit logs."
+        )
+
+    scope = args.scope.strip()
 
     print("=" * 50)
-    print("GitHub Device Flow - User Access Token")
+    print("OAuth App Device Flow - User Access Token")
     print("=" * 50)
     print("\n⚠️  WARNING: For demonstration/testing only. "
           "Not for production use.")
-    print(f"\nClient ID: {client_id}\n")
+    print(f"\nClient ID: {client_id}")
+    print(f"Scope:     {scope}\n")
 
-    # Step 1: Get device code
+    # Step 1: Get device code (with scope)
     print("Requesting device code...")
-    device_data = request_device_code(client_id)
+    device_data = request_device_code(client_id, scope)
 
     user_code = device_data["user_code"]
     verification_uri = device_data["verification_uri"]
@@ -200,34 +250,51 @@ def main() -> None:
     print("\n" + "=" * 50)
     print("ACTION REQUIRED")
     print("=" * 50)
-    print(f"\n1. Go to: {verification_uri}")
+    print(f"\n1. Open: {verification_uri}")
     print(f"2. Enter code: {user_code}")
+    print()
+
+    # Auto-open browser via stdlib (cross-platform) and copy code to
+    # clipboard via pbcopy (macOS-only). Both are graceful no-ops where
+    # unsupported (Linux without pbcopy, headless CI, SSH sessions, etc.).
+    # Success messages are gated on the underlying call so we don't claim
+    # "copied" / "opening" when the tool fails.
+    if shutil.which("pbcopy"):
+        result = subprocess.run(["pbcopy"], input=user_code, text=True, check=False)
+        if result.returncode == 0:
+            print("📋 Code copied to clipboard.")
+    if webbrowser.open(verification_uri, new=2):
+        print("🌐 Opening browser...")
+
     print("\nWaiting for authorisation...")
 
     # Step 3: Poll for token
-    token_data = poll_for_token(client_id, device_code, interval)
+    token_data = poll_for_token(client_id, client_secret, device_code, interval)
 
     access_token = token_data["access_token"]
     token_type = token_data.get("token_type", "bearer")
-    scope = token_data.get("scope", "")
+    granted_scope = token_data.get("scope", "")
 
     print("\n" + "=" * 50)
     print("SUCCESS!")
     print("=" * 50)
-    print(f"\nToken Type: {token_type}")
-    print(f"Scope: {scope}")
+    print(f"\nToken Type:    {token_type}")
+    print(f"Granted Scope: {granted_scope}")
     if len(access_token) >= TOKEN_MIN_LENGTH_FOR_TRUNCATION:
-        print(f"Access Token: {access_token[:TOKEN_PREFIX_LENGTH]}..."
-              f"{access_token[-TOKEN_SUFFIX_LENGTH:]}")
+        if "_" in access_token:
+            prefix = access_token.split("_", 1)[0] + "_"
+        else:
+            prefix = access_token[:4]
+        print(f"Access Token:  {prefix}***{access_token[-TOKEN_SUFFIX_LENGTH:]}")
     else:
-        print(f"Access Token: {access_token}")
+        print(f"Access Token:  {access_token}")
 
     # Step 4: Test the token
     print("\nTesting token by fetching user info...")
     user_info = test_token(access_token)
     print(f"\nAuthenticated as: {user_info['login']}")
-    print(f"Name: {user_info.get('name', 'N/A')}")
-    print(f"Email: {user_info.get('email', 'N/A')}")
+    print(f"Name:             {user_info.get('name', 'N/A')}")
+    print(f"Email:            {user_info.get('email', 'N/A')}")
 
     # NOTE: Printing the full token is intentional for demo/testing purposes.
     # This allows token capture via: export TOKEN=$(python device_flow.py ... | tail -1)

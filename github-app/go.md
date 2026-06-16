@@ -100,6 +100,9 @@ ACTION REQUIRED
 1. Go to: https://github.com/login/device
 2. Enter code: XXXX-XXXX
 
+📋 Code copied to clipboard.
+🌐 Opening browser...
+
 Waiting for authorisation...
 
 ==================================================
@@ -108,7 +111,7 @@ SUCCESS!
 
 Token Type: bearer
 Scope: 
-Access Token: ghu_xxxxxxxxxxxx...xxxxxxxxxx
+Access Token: ghu_***xxxxxxxx
 
 Testing token by fetching user info...
 
@@ -138,4 +141,4 @@ curl -H "Authorization: Bearer $GITHUB_USER_TOKEN" https://api.github.com/user
 
 ## Troubleshooting
 
-See [Common Issues](common-issues.md) for troubleshooting help.
+See [Common Issues](../common-issues.md) for troubleshooting help.
