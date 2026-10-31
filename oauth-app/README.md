@@ -63,6 +63,7 @@ All four scripts accept the same flags:
 |---|---|---|
 | `-c`, `--client-id <id>` | `$GITHUB_CLIENT_ID` env var | OAuth App Client ID |
 | `-s`, `--scope <scope>` | `repo,read:org` | Comma-separated OAuth scopes |
+| `-H`, `--hostname <host>` | `github.com` (or `$GITHUB_HOST` env var) | GitHub hostname (`github.com`, `*.ghe.com`, or GHES host) |
 | `-h`, `--help` | — | Show help |
 
 ## Per-language guides

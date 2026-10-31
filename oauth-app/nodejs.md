@@ -78,6 +78,14 @@ The default scope is `repo,read:org`. Pass any comma-separated combination via `
 node device_flow.js --client-id YOUR_CLIENT_ID --scope "repo,read:org,user"
 ```
 
+### GitHub Enterprise Server / GHEC with Data Residency
+
+Target a custom hostname with `--hostname` (`-H`) or `GITHUB_HOST`:
+
+```bash
+node device_flow.js --client-id YOUR_CLIENT_ID --hostname ghes.example.com
+```
+
 ### Show Help
 
 ```bash

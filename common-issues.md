@@ -38,7 +38,7 @@ GitHub returns a generic `Not Found` for several distinct causes:
 2. **Device Flow not enabled** on the app. Open the app's settings page and tick **Enable Device Flow**.
 3. **Missing Authorization callback URL** on the app. Even though Device Flow doesn't use the callback, one must be configured (e.g., `http://localhost`).
 
-The OAuth App scripts (shell, Python, Node.js, and Go) all validate the Client ID shape with a regex before hitting GitHub, so you'll get a clear local error rather than this cryptic upstream response. The GitHub App scripts don't have this regex guard — if you're in GitHub App mode and see `Not Found`, the three causes above are the place to look.
+The GitHub App and OAuth App scripts (shell, Python, Node.js, and Go) all validate the Client ID shape with a regex (`^[A-Za-z0-9._-]+$`) and trim leading/trailing whitespace before hitting GitHub, so you'll get a clear local error on stray prefixes or spaces rather than this cryptic upstream response. If the Client ID format passes validation and you still see `Not Found` (or HTTP 404), check causes 2 and 3 above, or verify `--hostname` / `GITHUB_HOST` if your app lives on GitHub Enterprise Server or GHEC with data residency (`*.ghe.com`).
 
 ## "Device code expired" error
 
