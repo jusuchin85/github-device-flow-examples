@@ -36,13 +36,19 @@ trim() {
     printf '%s' "$s"
 }
 
-# Normalise hostname by stripping optional scheme and trailing slash.
+# Normalise hostname by stripping optional scheme and trailing slashes.
 normalise_hostname() {
-    local h
+    local h lower
     h="$(trim "$1")"
-    h="${h#https://}"
-    h="${h#http://}"
-    h="${h%/}"
+    lower="$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower" == https://* ]]; then
+        h="${h:8}"
+    elif [[ "$lower" == http://* ]]; then
+        h="${h:7}"
+    fi
+    while [[ "$h" == */ ]]; do
+        h="${h%/}"
+    done
     printf '%s' "$h"
 }
 
