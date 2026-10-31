@@ -21,6 +21,9 @@ node_modules/
 *.dll
 *.so
 *.dylib
+device_flow
+device_flow_go
+device_flow_linux
 
 # IDE / Editor
 .idea/
