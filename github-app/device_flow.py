@@ -256,7 +256,7 @@ def main() -> None:
     )
     parser.add_argument(
         "-H", "--hostname",
-        default=os.environ.get("GITHUB_HOST", DEFAULT_HOSTNAME).strip() or DEFAULT_HOSTNAME,
+        default=os.environ.get("GITHUB_HOST", DEFAULT_HOSTNAME),
         help=f"GitHub hostname (default: {DEFAULT_HOSTNAME}, or set GITHUB_HOST env var)",
     )
     args = parser.parse_args()

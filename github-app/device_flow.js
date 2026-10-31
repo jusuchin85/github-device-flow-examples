@@ -163,7 +163,7 @@ async function testToken(accessToken, userApiUrl) {
 function parseArgs() {
   const args = process.argv.slice(2);
   let clientId = (process.env.GITHUB_CLIENT_ID || "").trim();
-  let hostname = (process.env.GITHUB_HOST || DEFAULT_HOSTNAME).trim();
+  let hostname = (process.env.GITHUB_HOST ?? DEFAULT_HOSTNAME).trim();
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--client-id" || args[i] === "-c") {

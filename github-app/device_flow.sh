@@ -65,7 +65,7 @@ usage() {
 
 # Parse arguments
 CLIENT_ID="${GITHUB_CLIENT_ID:-}"
-GITHUB_HOSTNAME="${GITHUB_HOST:-$DEFAULT_HOSTNAME}"
+GITHUB_HOSTNAME="${GITHUB_HOST-$DEFAULT_HOSTNAME}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in

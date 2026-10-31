@@ -298,17 +298,28 @@ func main() {
 	scope = strings.TrimSpace(scope)
 
 	// Merge --hostname / -H flags
-	if hostname == "" && hostnameShort != "" {
-		hostname = hostnameShort
-	} else if hostname != "" && hostnameShort != "" && hostname != hostnameShort {
+	var hostnameSet, hostnameShortSet bool
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "hostname":
+			hostnameSet = true
+		case "H":
+			hostnameShortSet = true
+		}
+	})
+	if hostnameSet && hostnameShortSet && hostname != hostnameShort {
 		fmt.Fprintln(os.Stderr, "Error: Both --hostname and -H provided with different values. Use one or the other.")
 		os.Exit(1)
 	}
-	if hostname == "" {
-		hostname = os.Getenv("GITHUB_HOST")
+	if !hostnameSet && hostnameShortSet {
+		hostname = hostnameShort
 	}
-	if strings.TrimSpace(hostname) == "" {
-		hostname = defaultHostname
+	if !hostnameSet && !hostnameShortSet {
+		if envHost, ok := os.LookupEnv("GITHUB_HOST"); ok {
+			hostname = envHost
+		} else {
+			hostname = defaultHostname
+		}
 	}
 	hostname = normaliseHostname(hostname)
 	if hostname == "" || !hostnamePattern.MatchString(hostname) {
