@@ -152,11 +152,10 @@ fi
 
 # Resolve endpoints for github.com, GHEC with data residency (*.ghe.com), or GHES
 HOSTNAME_LOWER="$(printf '%s' "$GITHUB_HOSTNAME" | tr '[:upper:]' '[:lower:]')"
+HOST_ONLY="${HOSTNAME_LOWER%%:*}"
 readonly DEVICE_CODE_URL="https://${GITHUB_HOSTNAME}/login/device/code"
 readonly ACCESS_TOKEN_URL="https://${GITHUB_HOSTNAME}/login/oauth/access_token"
-if [[ "$HOSTNAME_LOWER" == "github.com" ]]; then
-    readonly USER_API_URL="https://api.github.com/user"
-elif [[ "$HOSTNAME_LOWER" == *.ghe.com ]]; then
+if [[ "$HOST_ONLY" == "github.com" || "$HOST_ONLY" == *.ghe.com ]]; then
     readonly USER_API_URL="https://api.${GITHUB_HOSTNAME}/user"
 else
     readonly USER_API_URL="https://${GITHUB_HOSTNAME}/api/v3/user"

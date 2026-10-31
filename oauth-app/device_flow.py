@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Tuple
 import webbrowser
 
 import requests
@@ -70,19 +71,17 @@ def normalise_hostname(hostname: str) -> str:
     return h.rstrip("/")
 
 
-def resolve_endpoints(hostname: str) -> tuple[str, str, str]:
+def resolve_endpoints(hostname: str) -> Tuple[str, str, str]:
     """
     Resolve Device Flow and REST API endpoints for a GitHub hostname.
 
     Supports github.com, GHEC with data residency (*.ghe.com), and
     GitHub Enterprise Server (GHES).
     """
-    lower = hostname.lower()
+    host_only = hostname.lower().partition(":")[0]
     device_code_url = f"https://{hostname}/login/device/code"
     access_token_url = f"https://{hostname}/login/oauth/access_token"
-    if lower == "github.com":
-        user_api_url = "https://api.github.com/user"
-    elif lower.endswith(".ghe.com"):
+    if host_only == "github.com" or host_only.endswith(".ghe.com"):
         user_api_url = f"https://api.{hostname}/user"
     else:
         user_api_url = f"https://{hostname}/api/v3/user"

@@ -77,12 +77,10 @@ func normaliseHostname(hostname string) string {
 }
 
 func resolveEndpoints(hostname string) (deviceCodeURL, accessTokenURL, userAPIURL string) {
-	lower := strings.ToLower(hostname)
+	hostOnly := strings.SplitN(strings.ToLower(hostname), ":", 2)[0]
 	deviceCodeURL = fmt.Sprintf("https://%s/login/device/code", hostname)
 	accessTokenURL = fmt.Sprintf("https://%s/login/oauth/access_token", hostname)
-	if lower == "github.com" {
-		userAPIURL = "https://api.github.com/user"
-	} else if strings.HasSuffix(lower, ".ghe.com") {
+	if hostOnly == "github.com" || strings.HasSuffix(hostOnly, ".ghe.com") {
 		userAPIURL = fmt.Sprintf("https://api.%s/user", hostname)
 	} else {
 		userAPIURL = fmt.Sprintf("https://%s/api/v3/user", hostname)

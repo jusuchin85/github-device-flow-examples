@@ -41,13 +41,11 @@ function normaliseHostname(hostname) {
 }
 
 function resolveEndpoints(hostname) {
-  const lower = hostname.toLowerCase();
+  const hostOnly = hostname.toLowerCase().split(":")[0];
   const deviceCodeUrl = `https://${hostname}/login/device/code`;
   const accessTokenUrl = `https://${hostname}/login/oauth/access_token`;
   let userApiUrl;
-  if (lower === "github.com") {
-    userApiUrl = "https://api.github.com/user";
-  } else if (lower.endsWith(".ghe.com")) {
+  if (hostOnly === "github.com" || hostOnly.endsWith(".ghe.com")) {
     userApiUrl = `https://api.${hostname}/user`;
   } else {
     userApiUrl = `https://${hostname}/api/v3/user`;
