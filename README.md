@@ -70,6 +70,14 @@ cd github-app
 ./device_flow.sh --client-id YOUR_CLIENT_ID
 ```
 
+**GitHub Enterprise Server / GHEC with data residency (`*.ghe.com`):**
+
+All 8 scripts accept `--hostname` (`-H`) or the `GITHUB_HOST` environment variable (default: `github.com`) and automatically resolve the right Device Flow and `/user` REST API endpoints (`https://api.github.com/user`, `https://api.<tenant>.ghe.com/user`, or `https://<ghes-host>/api/v3/user`):
+
+```bash
+./device_flow.sh --client-id YOUR_CLIENT_ID --hostname ghes.example.com
+```
+
 ## Secret hygiene
 
 For OAuth Apps, the **Client Secret is read from the `GITHUB_CLIENT_SECRET` env var only** — never from a CLI flag. Flags leak to shell history, `ps` output, and audit logs, so we deliberately don't accept them. The Client ID is public and can be passed either way.

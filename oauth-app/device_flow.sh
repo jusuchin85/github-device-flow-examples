@@ -20,14 +20,20 @@
 
 set -euo pipefail
 
-readonly DEVICE_CODE_URL="https://github.com/login/device/code"
-readonly ACCESS_TOKEN_URL="https://github.com/login/oauth/access_token"
-readonly SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
+readonly DEFAULT_HOSTNAME="github.com"
 readonly DEFAULT_POLL_INTERVAL=5
 readonly SLOW_DOWN_INCREMENT=5
 readonly TOKEN_MIN_LENGTH_FOR_TRUNCATION=30
 readonly TOKEN_SUFFIX_LENGTH=8
 readonly DEFAULT_SCOPE="repo,read:org"
+readonly CURL_CONNECT_TIMEOUT=10
+readonly CURL_MAX_TIME=30
+readonly API_VERSION="2022-11-28"
+readonly USER_AGENT="github-device-flow-examples"
+
+trap 'echo ""; echo "Cancelled by user." >&2; exit 130' INT
 
 # Trim leading and trailing whitespace only — internal whitespace is preserved
 # so a copy/paste like "abc def" still trips the regex check below instead of
@@ -39,30 +45,48 @@ trim() {
     printf '%s' "$s"
 }
 
+# Normalise hostname by stripping optional scheme and trailing slashes.
+normalise_hostname() {
+    local h lower
+    h="$(trim "$1")"
+    lower="$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower" == https://* ]]; then
+        h="${h:8}"
+    elif [[ "$lower" == http://* ]]; then
+        h="${h:7}"
+    fi
+    while [[ "$h" == */ ]]; do
+        h="${h%/}"
+    done
+    printf '%s' "$h"
+}
+
 # Display usage information
 usage() {
     echo "Usage: $SCRIPT_NAME [options]"
     echo ""
     echo "Options:"
-    echo "  -c, --client-id <id>  OAuth App Client ID (or set GITHUB_CLIENT_ID env var)"
-    echo "  -s, --scope <scope>   Comma-separated OAuth scopes (default: $DEFAULT_SCOPE)"
-    echo "  -h, --help            Show this help message"
+    echo "  -c, --client-id <id>   OAuth App Client ID (or set GITHUB_CLIENT_ID env var)"
+    echo "  -s, --scope <scope>    Comma-separated OAuth scopes (default: $DEFAULT_SCOPE)"
+    echo "  -H, --hostname <host>  GitHub hostname (default: $DEFAULT_HOSTNAME, or set GITHUB_HOST env var)"
+    echo "  -h, --help             Show this help message"
     echo ""
     echo "Required env vars:"
-    echo "  GITHUB_CLIENT_SECRET  OAuth App Client Secret. Env-var only — we never"
-    echo "                        accept secrets as CLI flags because flags leak to"
-    echo "                        shell history and ps output."
+    echo "  GITHUB_CLIENT_SECRET   OAuth App Client Secret. Env-var only — we never"
+    echo "                         accept secrets as CLI flags because flags leak to"
+    echo "                         shell history and ps output."
     exit 0
 }
 
 # Parse arguments
 CLIENT_ID="${GITHUB_CLIENT_ID:-}"
 SCOPE="$DEFAULT_SCOPE"
+GITHUB_HOSTNAME="${GITHUB_HOST-$DEFAULT_HOSTNAME}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         -c|--client-id)
-            if [[ $# -lt 2 || -z "${2-}" ]]; then
+            if [[ $# -lt 2 || -z "${2-}" || "${2-}" == -* ]]; then
                 echo "Error: --client-id requires a non-empty argument." >&2
                 exit 1
             fi
@@ -70,11 +94,19 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -s|--scope)
-            if [[ $# -lt 2 || -z "${2-}" ]]; then
+            if [[ $# -lt 2 || -z "${2-}" || "${2-}" == -* ]]; then
                 echo "Error: --scope requires a non-empty argument." >&2
                 exit 1
             fi
             SCOPE="$2"
+            shift 2
+            ;;
+        -H|--hostname)
+            if [[ $# -lt 2 || -z "${2-}" || "${2-}" == -* ]]; then
+                echo "Error: --hostname requires a non-empty argument." >&2
+                exit 1
+            fi
+            GITHUB_HOSTNAME="$2"
             shift 2
             ;;
         -h|--help)
@@ -94,6 +126,7 @@ done
 CLIENT_ID="$(trim "$CLIENT_ID")"
 CLIENT_SECRET="$(trim "${GITHUB_CLIENT_SECRET:-}")"
 SCOPE="$(trim "$SCOPE")"
+GITHUB_HOSTNAME="$(normalise_hostname "$GITHUB_HOSTNAME")"
 
 # Validate Client ID
 if [[ -z "$CLIENT_ID" ]]; then
@@ -108,6 +141,11 @@ if [[ ! "$CLIENT_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
     exit 1
 fi
 
+if [[ -z "$GITHUB_HOSTNAME" || ! "$GITHUB_HOSTNAME" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+    echo "Error: Invalid GitHub hostname: [$GITHUB_HOSTNAME]" >&2
+    exit 1
+fi
+
 # Validate Client Secret (env var only, never a flag)
 if [[ -z "$CLIENT_SECRET" ]]; then
     echo "Error: GITHUB_CLIENT_SECRET env var is required for OAuth Apps." >&2
@@ -116,6 +154,17 @@ if [[ -z "$CLIENT_SECRET" ]]; then
     echo "       We never accept secrets via CLI flags — they leak to shell" >&2
     echo "       history, ps output, and audit logs." >&2
     exit 1
+fi
+
+# Resolve endpoints for github.com, GHEC with data residency (*.ghe.com), or GHES
+HOSTNAME_LOWER="$(printf '%s' "$GITHUB_HOSTNAME" | tr '[:upper:]' '[:lower:]')"
+HOST_ONLY="${HOSTNAME_LOWER%%:*}"
+readonly DEVICE_CODE_URL="https://${GITHUB_HOSTNAME}/login/device/code"
+readonly ACCESS_TOKEN_URL="https://${GITHUB_HOSTNAME}/login/oauth/access_token"
+if [[ "$HOST_ONLY" == "github.com" || "$HOST_ONLY" == *.ghe.com ]]; then
+    readonly USER_API_URL="https://api.${GITHUB_HOSTNAME}/user"
+else
+    readonly USER_API_URL="https://${GITHUB_HOSTNAME}/api/v3/user"
 fi
 
 # Check for required tools
@@ -134,15 +183,29 @@ echo "⚠️  WARNING: For demonstration/testing only. Not for production use."
 echo ""
 echo "Client ID: $CLIENT_ID"
 echo "Scope:     $SCOPE"
+if [[ "$HOSTNAME_LOWER" != "github.com" ]]; then
+    echo "Hostname:  $GITHUB_HOSTNAME"
+fi
 echo ""
 
 # Step 1: Request device code (with scope, since OAuth Apps use scopes
 # unlike GitHub Apps which use installation permissions)
 echo "Requesting device code..."
-DEVICE_RESPONSE=$(curl -s -X POST "$DEVICE_CODE_URL" \
+DEVICE_HTTP_RESPONSE=$(curl -sS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+    -w "\n%{http_code}" -X POST "$DEVICE_CODE_URL" \
     -H "Accept: application/json" \
+    -H "User-Agent: $USER_AGENT" \
     --data-urlencode "client_id=$CLIENT_ID" \
     --data-urlencode "scope=$SCOPE")
+
+DEVICE_HTTP_CODE=$(echo "$DEVICE_HTTP_RESPONSE" | tail -1)
+DEVICE_RESPONSE=$(echo "$DEVICE_HTTP_RESPONSE" | sed '$d')
+
+if [[ "$DEVICE_HTTP_CODE" != "200" ]] || ! echo "$DEVICE_RESPONSE" | jq -e . >/dev/null 2>&1; then
+    echo "Error: Failed to get device code (HTTP $DEVICE_HTTP_CODE)" >&2
+    echo "$DEVICE_RESPONSE" >&2
+    exit 1
+fi
 
 DEVICE_CODE=$(echo "$DEVICE_RESPONSE" | jq -r '.device_code')
 USER_CODE=$(echo "$DEVICE_RESPONSE" | jq -r '.user_code')
@@ -186,12 +249,23 @@ echo "Waiting for authorisation..."
 # Step 3: Poll for token. OAuth Apps require client_secret in the token
 # exchange, unlike GitHub Apps which are public clients.
 while true; do
-    TOKEN_RESPONSE=$(curl -s -X POST "$ACCESS_TOKEN_URL" \
+    TOKEN_HTTP_RESPONSE=$(curl -sS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+        -w "\n%{http_code}" -X POST "$ACCESS_TOKEN_URL" \
         -H "Accept: application/json" \
+        -H "User-Agent: $USER_AGENT" \
         --data-urlencode "client_id=$CLIENT_ID" \
         --data-urlencode "client_secret=$CLIENT_SECRET" \
         --data-urlencode "device_code=$DEVICE_CODE" \
         --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code")
+
+    TOKEN_HTTP_CODE=$(echo "$TOKEN_HTTP_RESPONSE" | tail -1)
+    TOKEN_RESPONSE=$(echo "$TOKEN_HTTP_RESPONSE" | sed '$d')
+
+    if [[ "$TOKEN_HTTP_CODE" != "200" ]] || ! echo "$TOKEN_RESPONSE" | jq -e . >/dev/null 2>&1; then
+        echo "Error: Failed to poll for token (HTTP $TOKEN_HTTP_CODE)" >&2
+        echo "$TOKEN_RESPONSE" >&2
+        exit 1
+    fi
 
     ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
     ERROR=$(echo "$TOKEN_RESPONSE" | jq -r '.error')
@@ -256,14 +330,17 @@ fi
 echo ""
 echo "Testing token by fetching user info..."
 
-USER_RESPONSE=$(curl -s -w "\n%{http_code}" "https://api.github.com/user" \
+USER_RESPONSE=$(curl -sS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+    -w "\n%{http_code}" "$USER_API_URL" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
-    -H "Accept: application/vnd.github+json")
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: $API_VERSION" \
+    -H "User-Agent: $USER_AGENT")
 
 HTTP_CODE=$(echo "$USER_RESPONSE" | tail -1)
 USER_BODY=$(echo "$USER_RESPONSE" | sed '$d')
 
-if [[ "$HTTP_CODE" != "200" ]]; then
+if [[ "$HTTP_CODE" != "200" ]] || ! echo "$USER_BODY" | jq -e . >/dev/null 2>&1; then
     echo "Error: Failed to fetch user info (HTTP $HTTP_CODE)" >&2
     echo "$USER_BODY" >&2
     exit 1

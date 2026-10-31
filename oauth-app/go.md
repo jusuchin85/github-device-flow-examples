@@ -77,12 +77,20 @@ The default scope is `repo,read:org`. Pass any comma-separated combination via `
 go run device_flow.go --client-id YOUR_CLIENT_ID --scope "repo,read:org,user"
 ```
 
+### GitHub Enterprise Server / GHEC with Data Residency
+
+Target a custom hostname with `--hostname` (`-H`) or `GITHUB_HOST`:
+
+```bash
+go run device_flow.go --client-id YOUR_CLIENT_ID --hostname ghes.example.com
+```
+
 ### Building a Binary
 
 ```bash
-go build -o device_flow device_flow.go
+go build -o device_flow_go device_flow.go
 export GITHUB_CLIENT_SECRET='your-client-secret'
-./device_flow --client-id YOUR_CLIENT_ID
+./device_flow_go --client-id YOUR_CLIENT_ID
 ```
 
 ### Show Help

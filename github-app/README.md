@@ -57,6 +57,7 @@ All four scripts accept the same flags:
 | Flag | Default | Purpose |
 |---|---|---|
 | `-c`, `--client-id <id>` | `$GITHUB_CLIENT_ID` env var | GitHub App Client ID |
+| `-H`, `--hostname <host>` | `github.com` (or `$GITHUB_HOST` env var) | GitHub hostname (`github.com`, `*.ghe.com`, or GHES host) |
 | `-h`, `--help` | — | Show help |
 
 ## Per-language guides

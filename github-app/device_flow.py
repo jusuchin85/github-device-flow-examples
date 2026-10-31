@@ -12,10 +12,12 @@ may expose it in logs or shell history.
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
+from typing import Tuple
 import webbrowser
 
 import requests
@@ -23,12 +25,16 @@ import requests
 # Note: For GitHub Apps, permissions are defined in the App's settings,
 # not requested via scope parameter (that's for OAuth Apps only).
 
-DEVICE_CODE_URL = "https://github.com/login/device/code"
-ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
+DEFAULT_HOSTNAME = "github.com"
 DEFAULT_POLL_INTERVAL = 5
 SLOW_DOWN_INCREMENT = 5
 TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30
 TOKEN_SUFFIX_LENGTH = 8
+REQUEST_TIMEOUT_SECONDS = 30
+API_VERSION = "2022-11-28"
+USER_AGENT = "github-device-flow-examples"
+CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+HOSTNAME_PATTERN = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]+)?$")
 
 
 class DeviceFlowError(Exception):
@@ -49,7 +55,61 @@ class AuthorizationDeniedError(DeviceFlowError):
     pass
 
 
-def request_device_code(client_id: str) -> dict:
+def normalise_hostname(hostname: str) -> str:
+    """Strip optional http(s):// scheme and trailing slash from hostname."""
+    h = (hostname or "").strip()
+    for prefix in ("https://", "http://"):
+        if h.lower().startswith(prefix):
+            h = h[len(prefix):]
+            break
+    return h.rstrip("/")
+
+
+def resolve_endpoints(hostname: str) -> Tuple[str, str, str]:
+    """
+    Resolve Device Flow and REST API endpoints for a GitHub hostname.
+
+    Supports github.com, GHEC with data residency (*.ghe.com), and
+    GitHub Enterprise Server (GHES).
+    """
+    host_only = hostname.lower().partition(":")[0]
+    device_code_url = f"https://{hostname}/login/device/code"
+    access_token_url = f"https://{hostname}/login/oauth/access_token"
+    if host_only == "github.com" or host_only.endswith(".ghe.com"):
+        user_api_url = f"https://api.{hostname}/user"
+    else:
+        user_api_url = f"https://{hostname}/api/v3/user"
+    return device_code_url, access_token_url, user_api_url
+
+
+def parse_json_response(response: requests.Response, context: str) -> dict:
+    """Validate HTTP status and parse JSON response safely."""
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        body = response.text.strip()
+        detail = f": {body}" if body else ""
+        raise DeviceFlowError(
+            f"{context} (HTTP {response.status_code}){detail}"
+        ) from exc
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise DeviceFlowError(
+            f"{context}: received non-JSON response from GitHub"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise DeviceFlowError(
+            f"{context}: unexpected JSON payload type ({type(data).__name__})"
+        )
+    return data
+
+
+def request_device_code(
+    client_id: str, device_code_url: str = f"https://{DEFAULT_HOSTNAME}/login/device/code"
+) -> dict:
     """
     Request a device code from GitHub.
 
@@ -57,6 +117,8 @@ def request_device_code(client_id: str) -> dict:
     ----------
     client_id : str
         The GitHub App's Client ID.
+    device_code_url : str
+        The device code endpoint URL.
 
     Returns
     -------
@@ -64,15 +126,23 @@ def request_device_code(client_id: str) -> dict:
         Response containing device_code, user_code, and verification_uri.
     """
     response = requests.post(
-        DEVICE_CODE_URL,
+        device_code_url,
         data={"client_id": client_id},
-        headers={"Accept": "application/json"},
+        headers={
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    return response.json()
+    return parse_json_response(response, "Failed to get device code")
 
 
-def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
+def poll_for_token(
+    client_id: str,
+    device_code: str,
+    interval: int,
+    access_token_url: str = f"https://{DEFAULT_HOSTNAME}/login/oauth/access_token",
+) -> dict:
     """
     Poll GitHub until the user authorizes or an error occurs.
 
@@ -84,6 +154,8 @@ def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
         The device code from the initial request.
     interval : int
         Polling interval in seconds.
+    access_token_url : str
+        The OAuth access token endpoint URL.
 
     Returns
     -------
@@ -101,16 +173,19 @@ def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
     """
     while True:
         response = requests.post(
-            ACCESS_TOKEN_URL,
+            access_token_url,
             data={
                 "client_id": client_id,
                 "device_code": device_code,
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             },
-            headers={"Accept": "application/json"},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
-        data = response.json()
+        data = parse_json_response(response, "Failed to poll for token")
 
         if "access_token" in data:
             return data
@@ -134,10 +209,13 @@ def poll_for_token(client_id: str, device_code: str, interval: int) -> dict:
                 "Received invalid response from GitHub (no access_token or error field)"
             )
         else:
-            raise DeviceFlowError(f"Unexpected error: {error}")
+            description = data.get("error_description", error)
+            raise DeviceFlowError(f"Unexpected error: {description}")
 
 
-def test_token(access_token: str) -> dict:
+def test_token(
+    access_token: str, user_api_url: str = "https://api.github.com/user"
+) -> dict:
     """
     Test the token by fetching the authenticated user's info.
 
@@ -145,6 +223,8 @@ def test_token(access_token: str) -> dict:
     ----------
     access_token : str
         The user access token to test.
+    user_api_url : str
+        The `/user` REST API endpoint URL.
 
     Returns
     -------
@@ -152,14 +232,16 @@ def test_token(access_token: str) -> dict:
         User information from the GitHub API.
     """
     response = requests.get(
-        "https://api.github.com/user",
+        user_api_url,
         headers={
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": API_VERSION,
+            "User-Agent": USER_AGENT,
         },
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    return response.json()
+    return parse_json_response(response, "Failed to fetch user info")
 
 
 def main() -> None:
@@ -172,6 +254,11 @@ def main() -> None:
         default=os.environ.get("GITHUB_CLIENT_ID", "").strip(),
         help="GitHub App Client ID (or set GITHUB_CLIENT_ID env var)",
     )
+    parser.add_argument(
+        "-H", "--hostname",
+        default=os.environ.get("GITHUB_HOST", DEFAULT_HOSTNAME),
+        help=f"GitHub hostname (default: {DEFAULT_HOSTNAME}, or set GITHUB_HOST env var)",
+    )
     args = parser.parse_args()
 
     client_id = (args.client_id or "").strip()
@@ -181,16 +268,32 @@ def main() -> None:
             "GITHUB_CLIENT_ID env var."
         )
 
+    if not CLIENT_ID_PATTERN.match(client_id):
+        parser.error(
+            f"GITHUB_CLIENT_ID contains unexpected characters.\n"
+            f"   Got: [{client_id}] ({len(client_id)} chars)\n"
+            f"   Re-export cleanly to fail fast on stray prefixes."
+        )
+
+    hostname = normalise_hostname(args.hostname)
+    if not hostname or not HOSTNAME_PATTERN.match(hostname):
+        parser.error(f"Invalid GitHub hostname: [{hostname}]")
+
+    device_code_url, access_token_url, user_api_url = resolve_endpoints(hostname)
+
     print("=" * 50)
     print("GitHub Device Flow - User Access Token")
     print("=" * 50)
     print("\n⚠️  WARNING: For demonstration/testing only. "
           "Not for production use.")
-    print(f"\nClient ID: {client_id}\n")
+    print(f"\nClient ID: {client_id}")
+    if hostname.lower() != DEFAULT_HOSTNAME:
+        print(f"Hostname:  {hostname}")
+    print()
 
     # Step 1: Get device code
     print("Requesting device code...")
-    device_data = request_device_code(client_id)
+    device_data = request_device_code(client_id, device_code_url)
 
     user_code = device_data["user_code"]
     verification_uri = device_data["verification_uri"]
@@ -201,7 +304,7 @@ def main() -> None:
     print("\n" + "=" * 50)
     print("ACTION REQUIRED")
     print("=" * 50)
-    print(f"\n1. Go to: {verification_uri}")
+    print(f"\n1. Open: {verification_uri}")
     print(f"2. Enter code: {user_code}")
     print()
 
@@ -220,7 +323,7 @@ def main() -> None:
     print("\nWaiting for authorisation...")
 
     # Step 3: Poll for token
-    token_data = poll_for_token(client_id, device_code, interval)
+    token_data = poll_for_token(client_id, device_code, interval, access_token_url)
 
     access_token = token_data["access_token"]
     token_type = token_data.get("token_type", "bearer")
@@ -229,8 +332,8 @@ def main() -> None:
     print("\n" + "=" * 50)
     print("SUCCESS!")
     print("=" * 50)
-    print(f"\nToken Type: {token_type}")
-    print(f"Scope: {scope}")
+    print(f"\nToken Type:   {token_type}")
+    print(f"Scope:        {scope}")
     if len(access_token) >= TOKEN_MIN_LENGTH_FOR_TRUNCATION:
         if "_" in access_token:
             prefix = access_token.split("_", 1)[0] + "_"
@@ -242,10 +345,10 @@ def main() -> None:
 
     # Step 4: Test the token
     print("\nTesting token by fetching user info...")
-    user_info = test_token(access_token)
+    user_info = test_token(access_token, user_api_url)
     print(f"\nAuthenticated as: {user_info['login']}")
-    print(f"Name: {user_info.get('name', 'N/A')}")
-    print(f"Email: {user_info.get('email', 'N/A')}")
+    print(f"Name:             {user_info.get('name', 'N/A')}")
+    print(f"Email:            {user_info.get('email', 'N/A')}")
 
     # NOTE: Printing the full token is intentional for demo/testing purposes.
     # This allows token capture via: export TOKEN=$(python device_flow.py ... | tail -1)

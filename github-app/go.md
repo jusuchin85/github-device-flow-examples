@@ -54,6 +54,14 @@ export GITHUB_CLIENT_ID=YOUR_CLIENT_ID
 go run device_flow.go
 ```
 
+### GitHub Enterprise Server / GHEC with Data Residency
+
+Target a custom hostname with `--hostname` (`-H`) or `GITHUB_HOST`:
+
+```bash
+go run device_flow.go --client-id YOUR_CLIENT_ID --hostname ghes.example.com
+```
+
 ### Show Help
 
 ```bash
@@ -89,6 +97,8 @@ GOOS=windows GOARCH=amd64 go build -o device_flow.exe device_flow.go
 GitHub Device Flow - User Access Token
 ==================================================
 
+⚠️  WARNING: For demonstration/testing only. Not for production use.
+
 Client ID: Iv23liXXXXXXXXXXXXXX
 
 Requesting device code...
@@ -97,7 +107,7 @@ Requesting device code...
 ACTION REQUIRED
 ==================================================
 
-1. Go to: https://github.com/login/device
+1. Open: https://github.com/login/device
 2. Enter code: XXXX-XXXX
 
 📋 Code copied to clipboard.
@@ -109,15 +119,15 @@ Waiting for authorisation...
 SUCCESS!
 ==================================================
 
-Token Type: bearer
-Scope: 
+Token Type:   bearer
+Scope:        
 Access Token: ghu_***xxxxxxxx
 
 Testing token by fetching user info...
 
 Authenticated as: your-username
-Name: Your Name
-Email: you@example.com
+Name:             Your Name
+Email:            you@example.com
 
 ==================================================
 FULL ACCESS TOKEN (for use in other applications):
