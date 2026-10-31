@@ -26,22 +26,29 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"strings"
 	"time"
 )
 
 const (
-	deviceCodeURL               = "https://github.com/login/device/code"
-	accessTokenURL              = "https://github.com/login/oauth/access_token"
+	defaultHostname             = "github.com"
 	defaultPollInterval         = 5
 	slowDownIncrement           = 5
 	tokenMinLengthForTruncation = 30
 	tokenSuffixLength           = 8
 	defaultScope                = "repo,read:org"
+	requestTimeout              = 30 * time.Second
+	apiVersion                  = "2022-11-28"
+	userAgent                   = "github-device-flow-examples"
 )
 
-var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var (
+	clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9.-]+(:[0-9]+)?$`)
+	httpClient      = &http.Client{Timeout: requestTimeout}
+)
 
 // DeviceCodeResponse represents the response from the device code request.
 type DeviceCodeResponse struct {
@@ -68,9 +75,34 @@ type UserInfo struct {
 	Email *string `json:"email"`
 }
 
+func normaliseHostname(hostname string) string {
+	h := strings.TrimSpace(hostname)
+	lower := strings.ToLower(h)
+	if strings.HasPrefix(lower, "https://") {
+		h = h[len("https://"):]
+	} else if strings.HasPrefix(lower, "http://") {
+		h = h[len("http://"):]
+	}
+	return strings.TrimRight(h, "/")
+}
+
+func resolveEndpoints(hostname string) (deviceCodeURL, accessTokenURL, userAPIURL string) {
+	lower := strings.ToLower(hostname)
+	deviceCodeURL = fmt.Sprintf("https://%s/login/device/code", hostname)
+	accessTokenURL = fmt.Sprintf("https://%s/login/oauth/access_token", hostname)
+	if lower == "github.com" {
+		userAPIURL = "https://api.github.com/user"
+	} else if strings.HasSuffix(lower, ".ghe.com") {
+		userAPIURL = fmt.Sprintf("https://api.%s/user", hostname)
+	} else {
+		userAPIURL = fmt.Sprintf("https://%s/api/v3/user", hostname)
+	}
+	return deviceCodeURL, accessTokenURL, userAPIURL
+}
+
 // requestDeviceCode requests a device code from GitHub. Includes scope
 // (OAuth App-specific — GitHub Apps use installation permissions).
-func requestDeviceCode(clientID, scope string) (*DeviceCodeResponse, error) {
+func requestDeviceCode(clientID, scope, deviceCodeURL string) (*DeviceCodeResponse, error) {
 	data := url.Values{
 		"client_id": {clientID},
 		"scope":     {scope},
@@ -82,21 +114,26 @@ func requestDeviceCode(clientID, scope string) (*DeviceCodeResponse, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get device code: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("failed to get device code: %s - %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	var result DeviceCodeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to get device code: received non-JSON response from GitHub")
 	}
 
 	return &result, nil
@@ -105,7 +142,7 @@ func requestDeviceCode(clientID, scope string) (*DeviceCodeResponse, error) {
 // pollForToken polls GitHub until the user authorizes or an error occurs.
 // OAuth Apps are confidential clients, so the token exchange requires
 // the client_secret in addition to the device_code.
-func pollForToken(clientID, clientSecret, deviceCode string, interval int) (*TokenResponse, error) {
+func pollForToken(clientID, clientSecret, deviceCode string, interval int, accessTokenURL string) (*TokenResponse, error) {
 	data := url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
@@ -120,23 +157,27 @@ func pollForToken(clientID, clientSecret, deviceCode string, interval int) (*Tok
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("User-Agent", userAgent)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
 
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+			return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 
 		var result TokenResponse
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
-			return nil, err
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to poll for token: received non-JSON response from GitHub")
 		}
-		resp.Body.Close()
 
 		if result.AccessToken != "" {
 			return &result, nil
@@ -167,39 +208,55 @@ func pollForToken(clientID, clientSecret, deviceCode string, interval int) (*Tok
 }
 
 // testToken tests the token by fetching the authenticated user's info.
-func testToken(accessToken string) (*UserInfo, error) {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+func testToken(accessToken, userAPIURL string) (*UserInfo, error) {
+	req, err := http.NewRequest("GET", userAPIURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch user: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("failed to fetch user: %s - %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	var user UserInfo
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &user); err != nil {
+		return nil, fmt.Errorf("failed to fetch user: received non-JSON response from GitHub")
 	}
 
 	return &user, nil
 }
 
 func main() {
-	var clientID, clientIDShort, scope, scopeShort string
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	go func() {
+		<-sigChan
+		fmt.Fprintln(os.Stderr, "\nCancelled by user.")
+		os.Exit(130)
+	}()
+
+	var clientID, clientIDShort, scope, scopeShort, hostname, hostnameShort string
 	flag.StringVar(&clientID, "client-id", "", "OAuth App Client ID")
 	flag.StringVar(&clientIDShort, "c", "", "OAuth App Client ID (shorthand)")
 	flag.StringVar(&scope, "scope", "", fmt.Sprintf("Comma-separated OAuth scopes (default: %q)", defaultScope))
 	flag.StringVar(&scopeShort, "s", "", "Comma-separated OAuth scopes (shorthand)")
+	flag.StringVar(&hostname, "hostname", "", fmt.Sprintf("GitHub hostname (default: %q)", defaultHostname))
+	flag.StringVar(&hostnameShort, "H", "", "GitHub hostname (shorthand)")
 	flag.Parse()
 
 	// Merge --client-id / -c flags
@@ -242,6 +299,25 @@ func main() {
 	}
 	scope = strings.TrimSpace(scope)
 
+	// Merge --hostname / -H flags
+	if hostname == "" && hostnameShort != "" {
+		hostname = hostnameShort
+	} else if hostname != "" && hostnameShort != "" && hostname != hostnameShort {
+		fmt.Fprintln(os.Stderr, "Error: Both --hostname and -H provided with different values. Use one or the other.")
+		os.Exit(1)
+	}
+	if hostname == "" {
+		hostname = os.Getenv("GITHUB_HOST")
+	}
+	if strings.TrimSpace(hostname) == "" {
+		hostname = defaultHostname
+	}
+	hostname = normaliseHostname(hostname)
+	if hostname == "" || !hostnamePattern.MatchString(hostname) {
+		fmt.Fprintf(os.Stderr, "Error: Invalid GitHub hostname: [%s]\n", hostname)
+		os.Exit(1)
+	}
+
 	// Client secret is env-var only — never a flag
 	clientSecret := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET"))
 	if clientSecret == "" {
@@ -254,16 +330,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	deviceCodeURL, accessTokenURL, userAPIURL := resolveEndpoints(hostname)
+
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("OAuth App Device Flow - User Access Token")
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("\n⚠️  WARNING: For demonstration/testing only. Not for production use.")
 	fmt.Printf("\nClient ID: %s\n", clientID)
-	fmt.Printf("Scope:     %s\n\n", scope)
+	fmt.Printf("Scope:     %s\n", scope)
+	if !strings.EqualFold(hostname, defaultHostname) {
+		fmt.Printf("Hostname:  %s\n", hostname)
+	}
+	fmt.Println()
 
 	// Step 1: Get device code
 	fmt.Println("Requesting device code...")
-	deviceData, err := requestDeviceCode(clientID, scope)
+	deviceData, err := requestDeviceCode(clientID, scope, deviceCodeURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -301,7 +383,7 @@ func main() {
 	if interval == 0 {
 		interval = defaultPollInterval
 	}
-	tokenData, err := pollForToken(clientID, clientSecret, deviceData.DeviceCode, interval)
+	tokenData, err := pollForToken(clientID, clientSecret, deviceData.DeviceCode, interval, accessTokenURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -333,7 +415,7 @@ func main() {
 
 	// Step 4: Test the token
 	fmt.Println("\nTesting token by fetching user info...")
-	userInfo, err := testToken(tokenData.AccessToken)
+	userInfo, err := testToken(tokenData.AccessToken, userAPIURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

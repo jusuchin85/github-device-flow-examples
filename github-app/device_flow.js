@@ -10,65 +10,105 @@
  * may expose it in logs or shell history.
  */
 
-const DEVICE_CODE_URL = "https://github.com/login/device/code";
-const ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
+const DEFAULT_HOSTNAME = "github.com";
 const DEFAULT_POLL_INTERVAL = 5;
 const SLOW_DOWN_INCREMENT = 5;
 const TOKEN_MIN_LENGTH_FOR_TRUNCATION = 30;
 const TOKEN_SUFFIX_LENGTH = 8;
+const REQUEST_TIMEOUT_MS = 30_000;
+const API_VERSION = "2022-11-28";
+const USER_AGENT = "github-device-flow-examples";
+const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+const HOSTNAME_PATTERN = /^[A-Za-z0-9.-]+(:[0-9]+)?$/;
 
 const { spawnSync } = require("node:child_process");
+
+process.on("SIGINT", () => {
+  console.error("\nCancelled by user.");
+  process.exit(130);
+});
 
 function hasCommand(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
   return r.status === 0;
 }
 
+function normaliseHostname(hostname) {
+  return (hostname || "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+}
+
+function resolveEndpoints(hostname) {
+  const lower = hostname.toLowerCase();
+  const deviceCodeUrl = `https://${hostname}/login/device/code`;
+  const accessTokenUrl = `https://${hostname}/login/oauth/access_token`;
+  let userApiUrl;
+  if (lower === "github.com") {
+    userApiUrl = "https://api.github.com/user";
+  } else if (lower.endsWith(".ghe.com")) {
+    userApiUrl = `https://api.${hostname}/user`;
+  } else {
+    userApiUrl = `https://${hostname}/api/v3/user`;
+  }
+  return { deviceCodeUrl, accessTokenUrl, userApiUrl };
+}
+
+async function parseJsonResponse(response, context) {
+  const text = await response.text();
+  if (!response.ok) {
+    const detail = text.trim() ? ` - ${text.trim()}` : "";
+    throw new Error(`${context}: HTTP ${response.status}${detail}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${context}: received non-JSON response from GitHub`);
+  }
+}
+
 /**
  * Step 1: Request a device code from GitHub.
  */
-async function requestDeviceCode(clientId) {
-  const response = await fetch(DEVICE_CODE_URL, {
+async function requestDeviceCode(clientId, deviceCodeUrl) {
+  const response = await fetch(deviceCodeUrl, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": USER_AGENT,
     },
     body: new URLSearchParams({ client_id: clientId }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to get device code: ${response.status}`);
-  }
-
-  return response.json();
+  return parseJsonResponse(response, "Failed to get device code");
 }
 
 /**
  * Step 2: Poll GitHub until the user authorizes or an error occurs.
  */
-async function pollForToken(clientId, deviceCode, interval) {
+async function pollForToken(clientId, deviceCode, interval, accessTokenUrl) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   while (true) {
-    const response = await fetch(ACCESS_TOKEN_URL, {
+    const response = await fetch(accessTokenUrl, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": USER_AGENT,
       },
       body: new URLSearchParams({
         client_id: clientId,
         device_code: deviceCode,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to poll for token: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await parseJsonResponse(response, "Failed to poll for token");
 
     if (data.access_token) {
       return data;
@@ -94,8 +134,10 @@ async function pollForToken(clientId, deviceCode, interval) {
         throw new Error(
           "Received invalid response from GitHub (no access_token or error field)"
         );
-      default:
-        throw new Error(`Unexpected error: ${data.error}`);
+      default: {
+        const description = data.error_description || data.error;
+        throw new Error(`Unexpected error: ${description}`);
+      }
     }
   }
 }
@@ -103,19 +145,18 @@ async function pollForToken(clientId, deviceCode, interval) {
 /**
  * Test the token by fetching the authenticated user's info.
  */
-async function testToken(accessToken) {
-  const response = await fetch("https://api.github.com/user", {
+async function testToken(accessToken, userApiUrl) {
+  const response = await fetch(userApiUrl, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": API_VERSION,
+      "User-Agent": USER_AGENT,
     },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch user: ${response.status}`);
-  }
-
-  return response.json();
+  return parseJsonResponse(response, "Failed to fetch user");
 }
 
 /**
@@ -124,6 +165,7 @@ async function testToken(accessToken) {
 function parseArgs() {
   const args = process.argv.slice(2);
   let clientId = (process.env.GITHUB_CLIENT_ID || "").trim();
+  let hostname = (process.env.GITHUB_HOST || DEFAULT_HOSTNAME).trim();
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--client-id" || args[i] === "-c") {
@@ -136,13 +178,24 @@ function parseArgs() {
       }
       clientId = next.trim();
       i++;
+    } else if (args[i] === "--hostname" || args[i] === "-H") {
+      const next = args[i + 1];
+      if (!next || next.startsWith("-")) {
+        console.error(
+          "Error: --hostname (or -H) flag requires a value. Usage: --hostname <host>"
+        );
+        process.exit(1);
+      }
+      hostname = next.trim();
+      i++;
     } else if (args[i] === "--help" || args[i] === "-h") {
       console.log(`
 Usage: node device_flow.js [options]
 
 Options:
-  -c, --client-id <id>  GitHub App Client ID (or set GITHUB_CLIENT_ID env var)
-  -h, --help            Show this help message
+  -c, --client-id <id>   GitHub App Client ID (or set GITHUB_CLIENT_ID env var)
+  -H, --hostname <host>  GitHub hostname (default: ${DEFAULT_HOSTNAME}, or set GITHUB_HOST env var)
+  -h, --help             Show this help message
       `);
       process.exit(0);
     } else if (args[i].startsWith("-")) {
@@ -159,21 +212,41 @@ Options:
     process.exit(1);
   }
 
-  return { clientId };
+  if (!CLIENT_ID_PATTERN.test(clientId)) {
+    console.error(
+      `Error: GITHUB_CLIENT_ID contains unexpected characters.\n` +
+      `   Got: [${clientId}] (${clientId.length} chars)\n` +
+      `   Re-export cleanly to fail fast on stray prefixes.`
+    );
+    process.exit(1);
+  }
+
+  hostname = normaliseHostname(hostname);
+  if (!hostname || !HOSTNAME_PATTERN.test(hostname)) {
+    console.error(`Error: Invalid GitHub hostname: [${hostname}]`);
+    process.exit(1);
+  }
+
+  return { clientId, hostname };
 }
 
 async function main() {
-  const { clientId } = parseArgs();
+  const { clientId, hostname } = parseArgs();
+  const { deviceCodeUrl, accessTokenUrl, userApiUrl } = resolveEndpoints(hostname);
 
   console.log("=".repeat(50));
   console.log("GitHub Device Flow - User Access Token");
   console.log("=".repeat(50));
   console.log("\n⚠️  WARNING: For demonstration/testing only. Not for production use.");
-  console.log(`\nClient ID: ${clientId}\n`);
+  console.log(`\nClient ID: ${clientId}`);
+  if (hostname.toLowerCase() !== DEFAULT_HOSTNAME) {
+    console.log(`Hostname:  ${hostname}`);
+  }
+  console.log();
 
   // Step 1: Get device code
   console.log("Requesting device code...");
-  const deviceData = await requestDeviceCode(clientId);
+  const deviceData = await requestDeviceCode(clientId, deviceCodeUrl);
 
   const { user_code, verification_uri, device_code, interval = DEFAULT_POLL_INTERVAL } = deviceData;
 
@@ -181,7 +254,7 @@ async function main() {
   console.log("\n" + "=".repeat(50));
   console.log("ACTION REQUIRED");
   console.log("=".repeat(50));
-  console.log(`\n1. Go to: ${verification_uri}`);
+  console.log(`\n1. Open: ${verification_uri}`);
   console.log(`2. Enter code: ${user_code}`);
   console.log();
 
@@ -206,15 +279,15 @@ async function main() {
   console.log("\nWaiting for authorisation...");
 
   // Step 3: Poll for token
-  const tokenData = await pollForToken(clientId, device_code, interval);
+  const tokenData = await pollForToken(clientId, device_code, interval, accessTokenUrl);
 
   const { access_token, token_type = "bearer", scope = "" } = tokenData;
 
   console.log("\n" + "=".repeat(50));
   console.log("SUCCESS!");
   console.log("=".repeat(50));
-  console.log(`\nToken Type: ${token_type}`);
-  console.log(`Scope: ${scope}`);
+  console.log(`\nToken Type:   ${token_type}`);
+  console.log(`Scope:        ${scope}`);
   if (access_token.length >= TOKEN_MIN_LENGTH_FOR_TRUNCATION) {
     const prefix = access_token.includes("_")
       ? access_token.split("_", 1)[0] + "_"
@@ -228,10 +301,10 @@ async function main() {
 
   // Step 4: Test the token
   console.log("\nTesting token by fetching user info...");
-  const userInfo = await testToken(access_token);
+  const userInfo = await testToken(access_token, userApiUrl);
   console.log(`\nAuthenticated as: ${userInfo.login}`);
-  console.log(`Name: ${userInfo.name || "N/A"}`);
-  console.log(`Email: ${userInfo.email || "N/A"}`);
+  console.log(`Name:             ${userInfo.name || "N/A"}`);
+  console.log(`Email:            ${userInfo.email || "N/A"}`);
 
   // NOTE: Printing the full token is intentional for demo/testing purposes.
   // This allows token capture via: export TOKEN=$(node device_flow.js ... | tail -1)
